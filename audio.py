@@ -38,7 +38,7 @@ def speak(state):
     if channel is not None and not channel.get_busy():
         current_state = None
 
-    # 🔥 same state → ignore
+    # same state → ignore
     if state == current_state:
         return
 

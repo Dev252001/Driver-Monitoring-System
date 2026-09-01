@@ -40,9 +40,12 @@ prev_eye_closed = False
 last_blink_reset = time.time()
 
 while cap.isOpened():
+    frame_start = time.time()
     ret, frame = cap.read()
     if not ret:
         break
+
+    state = "CALIBRATING"   # default — overwritten below once face is found
 
     frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
     frame = cv2.flip(frame, 1)
@@ -59,7 +62,7 @@ while cap.isOpened():
             ear = (get_ear(lm,[33,160,158,133,153,144]) +
                    get_ear(lm,[362,385,387,263,373,380])) / 2
 
-            ema_ear = 0.4 * ear + 0.6 * ema_ear
+            ema_ear = EAR_EMA_ALPHA * ear + (1 - EAR_EMA_ALPHA) * ema_ear
 
             # -------- GAZE --------
             gaze, ema_ratio = get_gaze(lm, ema_ratio)
@@ -77,7 +80,7 @@ while cap.isOpened():
                 state = "CALIBRATING"
 
                 if len(ear_samples) == CALIB_FRAMES:
-                    print("✅ Calibration Complete")
+                    print("Calibration Complete")
 
             else:
                 EAR_THRESHOLD = np.mean(ear_samples) * EAR_FACTOR
@@ -194,7 +197,7 @@ while cap.isOpened():
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 3)
 
     # -------- FPS --------
-    dt = time.time() - now
+    dt = time.time() - frame_start
     fps = int(1/dt) if dt > 0 else 0
 
     cv2.putText(frame, f"FPS: {fps}", (500,30),
