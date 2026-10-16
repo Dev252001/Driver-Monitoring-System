@@ -1,0 +1,12 @@
+﻿venv/
+__pycache__/
+*.pyc
+*.pyo
+results/raw/
+data/
+logs/
+*.mp4
+*.avi
+fatigue_log.csv
+*.log
+*.jsonl
