@@ -13,8 +13,8 @@ aspect-ratio-dependent (640×480 ≠ 1280×720 for the same physical eye).
 Mitigation: per-driver calibration normalises the threshold to the
 driver's own EAR distribution; see Config.ear_factor.
 
-NOTE (finding C2 — BUG, not yet fixed): gaze_ratio() pairs each iris
-with the OPPOSITE eye's corners.  The fix is Stage C1 in Phase 2.
+NOTE (finding C2 — fixed Stage C1): gaze_ratio() now pairs each iris
+with its own eye's corners.  See CHANGELOG.md for the arithmetic.
 """
 
 from __future__ import annotations
@@ -56,30 +56,32 @@ def iris_center(lm: list, pts: list[int]) -> np.ndarray:
 def gaze_ratio(lm: list) -> float:
     """Compute the raw horizontal gaze ratio from iris and eye-corner landmarks.
 
-    Formula (current code — BUG C2: corners are swapped between eyes):
-        left_iris_x  normalised by RIGHT eye corners  (lm[33], lm[133])
-        right_iris_x normalised by LEFT  eye corners  (lm[362], lm[263])
-        raw = mean of the two per-eye ratios
+    Each iris is normalised against its OWN eye's corners (fix for bug C2):
 
-    0.5 = centred gaze (only when both eyes are symmetric — see C2).
-    > 0.5 → driver looking left (image right).
-    < 0.5 → driver looking right (image left).
+        ratio_r = (right_iris_x - lm[33].x)  / (lm[133].x - lm[33].x)
+        ratio_l = (left_iris_x  - lm[362].x) / (lm[263].x - lm[362].x)
+        raw = (ratio_r + ratio_l) / 2
 
-    The swap does not affect symmetric frontal faces but introduces a
-    systematic error proportional to the difference in eye widths.
-    Fix is Stage C1 (Phase 2).
+    MediaPipe landmark convention (after cv2.flip, mirrored frame):
+        lm[33]  = right-eye outer corner (driver's left eye, image right)
+        lm[133] = right-eye inner corner
+        lm[362] = left-eye inner corner  (driver's right eye, image left)
+        lm[263] = left-eye outer corner
+
+    0.5 = centred gaze.
+    > 0.5 → irises shifted image-right → driver looking LEFT.
+    < 0.5 → irises shifted image-left  → driver looking RIGHT.
 
     Returns:
-        Raw gaze ratio (dimensionless, roughly [0, 1]).
+        Raw gaze ratio (dimensionless, in [0, 1] for typical gaze angles).
     """
-    left_iris = iris_center(lm, [474, 475, 476, 477])
+    left_iris  = iris_center(lm, [474, 475, 476, 477])
     right_iris = iris_center(lm, [469, 470, 471, 472])
 
-    # BUG C2: left iris uses RIGHT eye corners (33, 133);
-    #         right iris uses LEFT eye corners (362, 263).
-    ratio_l = (left_iris[0] - lm[33].x) / (lm[133].x - lm[33].x + 1e-6)
-    ratio_r = (right_iris[0] - lm[362].x) / (lm[263].x - lm[362].x + 1e-6)
-    return float((ratio_l + ratio_r) / 2)
+    # Each iris normalised against its own eye's corners (C2 fix).
+    ratio_r = (right_iris[0] - lm[33].x)  / (lm[133].x - lm[33].x  + 1e-6)
+    ratio_l = (left_iris[0]  - lm[362].x) / (lm[263].x - lm[362].x + 1e-6)
+    return float((ratio_r + ratio_l) / 2)
 
 
 def get_gaze(lm: list, ema_ratio: float) -> tuple[str, float]:
