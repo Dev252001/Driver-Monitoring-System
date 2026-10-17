@@ -1,11 +1,12 @@
-import cv2
 import time
+
+import cv2
 import mediapipe as mp
 import numpy as np
 
+from config import CALIB_FRAMES, EAR_EMA_ALPHA, EAR_FACTOR, GAZE_HOLD_TIME
 from detection import get_ear, get_gaze, get_head
 from state import handle_state
-from config import *
 
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True)

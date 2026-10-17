@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def get_ear(lm, eye):
     p2 = np.array([lm[eye[1]].x, lm[eye[1]].y])
     p6 = np.array([lm[eye[5]].x, lm[eye[5]].y])
@@ -20,11 +21,11 @@ def iris_center(lm, pts):
 
 
 def get_gaze(lm, ema_ratio):
-    l = iris_center(lm,[474,475,476,477])
-    r = iris_center(lm,[469,470,471,472])
+    left_iris = iris_center(lm, [474, 475, 476, 477])
+    right_iris = iris_center(lm, [469, 470, 471, 472])
 
-    ratio = ((l[0]-lm[33].x)/(lm[133].x-lm[33].x+1e-6) +
-             (r[0]-lm[362].x)/(lm[263].x-lm[362].x+1e-6)) / 2
+    ratio = ((left_iris[0] - lm[33].x) / (lm[133].x - lm[33].x + 1e-6) +
+             (right_iris[0] - lm[362].x) / (lm[263].x - lm[362].x + 1e-6)) / 2
 
     ema_ratio = 0.3 * ratio + 0.7 * ema_ratio
 

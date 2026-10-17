@@ -1,6 +1,7 @@
-import pygame
 import os
 import time
+
+import pygame
 
 pygame.mixer.init()
 
