@@ -2,7 +2,8 @@
 
 ## Project
 Real-time driver drowsiness/distraction monitor.
-Python 3.10.11 · OpenCV · MediaPipe Face Mesh · NumPy · Pygame.
+Python 3.10.11 · mediapipe==0.10.9 · opencv-contrib-python==4.10.0.84 · numpy==1.26.4 · pygame==2.6.1.
+Interpreter: `D:\Projects ML\venv_mp\Scripts\python.exe`
 
 ## Structure
 ```
@@ -29,11 +30,13 @@ data/                 Recordings and extracted .npz — git-ignored
 
 ## Commands
 ```powershell
-py main.py                                                        # live
-py -m ruff check . && py -m pytest tests/ -v                     # lint+test
-py scripts/record_clip.py --subject S01 --session 1 --dry-run    # record
-py scripts/extract.py --video data/S01_1_day.mp4 --out data/S01_1_day.npz
-py scripts/evaluate.py --npz data/S01_1_day.npz --labels data/S01_1_day_labels.csv
+$py = "D:\Projects ML\venv_mp\Scripts\python.exe"
+& $py main.py                                                              # live
+& $py -m ruff check . ; & $py -m pytest tests/ -v                         # lint+test
+& $py scripts/smoke_check.py                                               # smoke
+& $py scripts/record_clip.py --subject S01 --session 1 --dry-run          # record
+& $py scripts/extract.py --video data/S01_1_day.mp4 --out data/S01_1_day.npz
+& $py scripts/evaluate.py --npz data/S01_1_day.npz --labels data/S01_1_day_labels.csv
 ```
 
 ## Commit convention (Conventional Commits)

@@ -5,6 +5,47 @@ order. Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — branch `polish/phase-3-evaluation` (C25 fix)
+
+### Fixed — C25: wrong mediapipe pin broke mp.solutions (main.py, extract.py, smoke_check.py)
+
+**Before (`1100475` requirements.txt):**
+```
+mediapipe==0.10.30
+opencv-contrib-python==4.13.0.92
+numpy>=1.24,<3
+pygame==2.5.2
+```
+The Stage A5-4 comment claimed "mediapipe==0.10.9 was yanked from PyPI" and
+"pygame==2.6.1 has no binary wheel for Python 3.10 on Windows" — both wrong.
+mediapipe 0.10.30 exists and installs, but exposes no `mp.solutions` attribute
+(`hasattr(mp, "solutions") is False`), so every call through `landmark_adapter`
+(production code in `main.py` and `scripts/extract.py`) and `smoke_check.py`
+crashed at runtime with `AttributeError: module 'mediapipe' has no attribute
+'solutions'`.
+
+**Why 130 passing tests did not catch it:** the entire test suite is intentionally
+headless — no test imports cv2, mediapipe, or pygame at collection time.
+All mediapipe calls live behind lazy imports or injectable backends.  A correct
+design for testability, but it means a broken mediapipe pin is invisible to pytest
+and is only caught by the smoke check or by running main.py.
+
+**After (verified working on Python 3.10.11):**
+```
+mediapipe==0.10.9
+opencv-contrib-python==4.10.0.84
+numpy==1.26.4
+pygame==2.6.1
+matplotlib==3.10.9
+```
+`smoke_check.py` now calls `landmark_adapter.process_frame` on a black frame
+instead of using `mp.solutions` directly, exercising the same code path as
+production.  `tests/test_adapter_smoke.py` is the pytest equivalent; it uses
+`pytest.importorskip("mediapipe")` so CI (which does not install mediapipe)
+skips it automatically.
+
+---
+
 ## [Unreleased] — branch `polish/phase-3-evaluation` (Stage 0)
 
 ### Fixed — C22: DOWN state unreachable (wrong unit conversion in monitor.py)

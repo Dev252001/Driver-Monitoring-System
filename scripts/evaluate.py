@@ -34,6 +34,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "evaluation"))
 
+from config import CFG, Config  # noqa: E402
+from landmark_adapter import array_to_landmarks  # noqa: E402
 from metrics import (  # noqa: E402
     Alert,
     FrameRecord,
@@ -44,9 +46,6 @@ from metrics import (  # noqa: E402
     frame_confusion_matrix,
     neutral_seconds,
 )
-
-from config import CFG, Config  # noqa: E402
-from landmark_adapter import array_to_landmarks  # noqa: E402
 
 
 # ── Labels from cue schedule ─────────────────────────────────────────────────

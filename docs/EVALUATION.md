@@ -46,14 +46,14 @@ Session IDs are anonymous. See `evaluation/splits.csv`.
 ### Record a clip
 
 ```powershell
-& "D:\Projects ML\venv310\Scripts\python.exe" scripts/record_clip.py `
+& "D:\Projects ML\venv_mp\Scripts\python.exe" scripts/record_clip.py `
     --subject S01 --session 1 --condition daylight --seed 42
 ```
 
 ### Extract landmarks
 
 ```powershell
-& "D:\Projects ML\venv310\Scripts\python.exe" scripts/extract.py `
+& "D:\Projects ML\venv_mp\Scripts\python.exe" scripts/extract.py `
     --video data/S01_1_daylight.mp4 `
     --timestamps data/S01_1_daylight_timestamps.csv `
     --out data/S01_1_daylight.npz
@@ -62,7 +62,7 @@ Session IDs are anonymous. See `evaluation/splits.csv`.
 ### Run evaluation
 
 ```powershell
-& "D:\Projects ML\venv310\Scripts\python.exe" scripts/evaluate.py `
+& "D:\Projects ML\venv_mp\Scripts\python.exe" scripts/evaluate.py `
     --npz data/S01_1_daylight.npz `
     --labels data/S01_1_daylight_labels.csv
 ```
@@ -71,7 +71,7 @@ Session IDs are anonymous. See `evaluation/splits.csv`.
 
 ```powershell
 # Fixed EAR threshold instead of calibrated
-& "D:\Projects ML\venv310\Scripts\python.exe" scripts/evaluate.py `
+& "D:\Projects ML\venv_mp\Scripts\python.exe" scripts/evaluate.py `
     --npz data/S01_1_daylight.npz --labels data/S01_1_daylight_labels.csv `
     --set ear_fixed_threshold=0.25
 
@@ -126,14 +126,14 @@ Session IDs are anonymous. See `evaluation/splits.csv`.
 ```powershell
 # EAR threshold sweep
 foreach ($f in 0.70, 0.75, 0.80, 0.85) {
-    & "D:\Projects ML\venv310\Scripts\python.exe" scripts/evaluate.py `
+    & "D:\Projects ML\venv_mp\Scripts\python.exe" scripts/evaluate.py `
         --npz data/S01_1_daylight.npz --labels data/S01_1_daylight_labels.csv `
         --set ear_factor=$f
 }
 
 # Head pitch threshold sweep
 foreach ($d in 10, 12, 15, 18, 20) {
-    & "D:\Projects ML\venv310\Scripts\python.exe" scripts/evaluate.py `
+    & "D:\Projects ML\venv_mp\Scripts\python.exe" scripts/evaluate.py `
         --npz data/S01_1_daylight.npz --labels data/S01_1_daylight_labels.csv `
         --set head_enter_deg=$d
 }
