@@ -163,27 +163,23 @@ class TestGetEar:
 
 
 class TestGazeRatio:
-    """Tests for the pure gaze_ratio() function.
+    """Tests for the pure gaze_ratio() function (post-fix C2 behaviour).
 
-    gaze_ratio() pairs each iris with the OPPOSITE eye's corners (bug C2).
-    These tests characterise the CURRENT (buggy) output so the fix in Stage C1
-    shows up as an explicit diff.
-
-    Exact numeric values:
-      Right eye corners: lm[33].x=inner, lm[133].x=outer  (in current code:
-        used for the LEFT iris)
-      Left  eye corners: lm[362].x=inner, lm[263].x=outer (in current code:
-        used for the RIGHT iris)
+    Correct formula (each iris normalised against its OWN eye's corners):
+      Right iris (469-472): (iris_x - lm[33].x) / (lm[133].x - lm[33].x)
+      Left  iris (474-477): (iris_x - lm[362].x) / (lm[263].x - lm[362].x)
 
     Symmetric eyes (width=0.09 each), irises centred in their own eyes:
-      ratio_l = (0.655 - 0.300) / (0.390 - 0.300) = 0.355 / 0.09 ≈ 3.944
-      ratio_r = (0.345 - 0.610) / (0.700 - 0.610) = -0.265 / 0.09 ≈ -2.944
-      raw = (3.944 + (-2.944)) / 2 = 0.500  [coincidentally correct on symmetric]
+      ratio_r = (0.345 - 0.300) / (0.390 - 0.300) = 0.045 / 0.090 = 0.500
+      ratio_l = (0.655 - 0.610) / (0.700 - 0.610) = 0.045 / 0.090 = 0.500
+      raw = 0.500  ✓
 
-    Asymmetric eyes (right width=0.09, left width=0.11), irises centred:
-      ratio_l = (0.595 - 0.360) / (0.450 - 0.360) = 0.235 / 0.09 ≈ 2.611
-      ratio_r = (0.405 - 0.540) / (0.650 - 0.540) = -0.135 / 0.11 ≈ -1.227
-      raw = (2.611 + (-1.227)) / 2 ≈ 0.692  [wrong — should be 0.500]
+    Asymmetric eyes (right width=0.090, left width=0.110), irises centred:
+      Right iris centred: x = 0.360 + 0.045 = 0.405
+      Left  iris centred: x = 0.540 + 0.055 = 0.595
+      ratio_r = (0.405 - 0.360) / (0.450 - 0.360) = 0.045 / 0.090 = 0.500
+      ratio_l = (0.595 - 0.540) / (0.650 - 0.540) = 0.055 / 0.110 = 0.500
+      raw = 0.500  ✓  (old buggy formula gave ≈ 0.692)
     """
 
     def _make_symmetric_lm(
@@ -204,11 +200,12 @@ class TestGazeRatio:
         return lm
 
     def test_symmetric_centred_ratio_is_0_5(self) -> None:
-        """Symmetric eyes, irises centred → raw ratio = 0.5 (coincidentally correct).
+        """Symmetric eyes, irises centred → raw ratio = 0.500.
 
-        ratio_l = (0.655 - 0.300) / (0.390 - 0.300) = 0.355 / 0.090 = 3.944...
-        ratio_r = (0.345 - 0.610) / (0.700 - 0.610) = -0.265 / 0.090 = -2.944...
-        raw = (3.944... + -2.944...) / 2 = 0.500
+        Corrected formula (each iris against its own eye's corners):
+          ratio_r = (0.345 - 0.300) / (0.390 - 0.300) = 0.045 / 0.090 = 0.500
+          ratio_l = (0.655 - 0.610) / (0.700 - 0.610) = 0.045 / 0.090 = 0.500
+          raw = 0.500
         """
         from detection import gaze_ratio  # noqa: PLC0415
 
@@ -216,8 +213,8 @@ class TestGazeRatio:
         raw = gaze_ratio(lm)
         assert abs(raw - 0.500) < 1e-3, f"Expected 0.500, got {raw:.6f}"
 
-    def test_bug_c2_asymmetric_centred_ratio_is_not_0_5(self) -> None:
-        """CHARACTERIZATION (bug C2): asymmetric eyes, irises centred → raw ≠ 0.5.
+    def test_asymmetric_centred_ratio_is_0_5(self) -> None:
+        """Asymmetric eyes, irises centred → raw = 0.500 after C2 fix.
 
         Setup:
           Right eye: outer=0.360, inner=0.450  → width=0.090
@@ -225,18 +222,12 @@ class TestGazeRatio:
           Right iris centred: x = 0.360 + 0.045 = 0.405
           Left  iris centred: x = 0.540 + 0.055 = 0.595
 
-        Bug C2 formula (left iris against RIGHT corners, right iris against LEFT):
-          ratio_l = (0.595 - 0.360) / (0.450 - 0.360) = 0.235 / 0.090 = 2.6111
-          ratio_r = (0.405 - 0.540) / (0.650 - 0.540) = -0.135 / 0.110 = -1.2273
-          raw = (2.6111 + -1.2273) / 2 = 0.6919
-
         Corrected formula (each iris against its own eye's corners):
-          ratio_r = (0.405 - 0.360) / (0.450 - 0.360) = 0.045 / 0.090 = 0.500
-          ratio_l = (0.595 - 0.540) / (0.650 - 0.540) = 0.055 / 0.110 = 0.500
-          corrected raw = 0.500
+          ratio_r = (0.405 - 0.360) / (0.450 - 0.360) = 0.045 / 0.090 = 0.5000
+          ratio_l = (0.595 - 0.540) / (0.650 - 0.540) = 0.055 / 0.110 = 0.5000
+          raw = 0.500
 
-        This test asserts the BUGGY value ≈ 0.692 so the Stage C1 fix shows
-        up as an explicit diff.
+        Old buggy formula gave raw ≈ 0.6919 — difference = 0.1919.
         """
         from detection import gaze_ratio  # noqa: PLC0415
 
@@ -251,10 +242,9 @@ class TestGazeRatio:
             set_lm(lm, i, 0.595, 0.500)   # left  iris centred in left eye
 
         raw = gaze_ratio(lm)
-        # Bug C2: raw ≈ 0.6919, not 0.500
-        assert abs(raw - 0.6919) < 0.001, (
-            f"Expected buggy raw ≈ 0.6919, got {raw:.4f}. "
-            "If this fails, bug C2 may be fixed — update this test."
+        assert abs(raw - 0.500) < 0.001, (
+            f"Expected corrected raw = 0.500 (C2 fix), got {raw:.4f}. "
+            "Old buggy value was ≈ 0.6919."
         )
 
     def test_looking_left_ratio_above_0_5(self) -> None:
@@ -342,16 +332,14 @@ class TestGetGaze:
         gaze, ema = get_gaze(lm, 0.2)   # prime EMA toward RIGHT
         assert gaze in ("RIGHT", "CENTER"), f"Expected RIGHT or CENTER, got {gaze}"
 
-    def test_bug_c2_wrong_corners_asymmetric(self) -> None:
-        """CHARACTERIZATION (bug C2): asymmetric eyes, irises centred → EMA ≠ 0.5.
+    def test_asymmetric_centred_ema_is_0_5(self) -> None:
+        """Asymmetric eyes, irises centred → EMA = 0.500 after C2 fix.
 
-        With asymmetric eye widths the buggy corner-swap gives raw ≈ 0.6919
-        (see TestGazeRatio.test_bug_c2_asymmetric_centred_ratio_is_not_0_5
-        for the exact arithmetic).  This test verifies that gaze_ratio() feeds
-        that value through the EMA correctly.
+        Corrected gaze_ratio() returns 0.500 for centred irises regardless of
+        eye-width asymmetry.  With prior_ema=0.5:
+          new_ema = 0.3 * 0.500 + 0.7 * 0.500 = 0.500
 
-        Expected:  new_ema = alpha * raw + (1 - alpha) * prior
-                           = 0.3 * 0.6919 + 0.7 * 0.5 = 0.5576
+        Old buggy formula gave raw ≈ 0.6919 → EMA ≈ 0.5576.
         """
         from config import CFG  # noqa: PLC0415
         from detection import gaze_ratio, get_gaze  # noqa: PLC0415
@@ -372,15 +360,16 @@ class TestGetGaze:
 
         _gaze, ema = get_gaze(lm, prior_ema)
 
-        print(f"\n[C2 characterization] raw={raw:.4f}, ema={ema:.4f}")
-        print("  old formula raw ≈ 0.692, corrected raw should be 0.500")
-
+        # Post-fix: raw = 0.500 → EMA = 0.500
+        assert abs(raw - 0.500) < 0.001, (
+            f"Expected corrected raw=0.500, got {raw:.4f}. "
+            "Old buggy value was ≈ 0.6919."
+        )
         assert abs(ema - expected_ema) < 1e-4, (
             f"EMA {ema:.4f} does not match expected {expected_ema:.4f}"
         )
-        assert raw > 0.60, (
-            f"Bug C2 appears to be already fixed (raw={raw:.4f}, expected > 0.60). "
-            "Update this test to reflect the corrected formula."
+        assert abs(ema - 0.500) < 0.001, (
+            f"Expected EMA=0.500 for centred asymmetric eyes after C2 fix, got {ema:.4f}."
         )
 
 
