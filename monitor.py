@@ -186,11 +186,17 @@ class DriverMonitor:
             get_ear(lm, self._RIGHT_EYE, frame_w, frame_h)
             + get_ear(lm, self._LEFT_EYE, frame_w, frame_h)
         ) / 2
-        self._ema_ear = alpha_ear * ear + (1.0 - alpha_ear) * self._ema_ear
+        if CFG.ema_enabled:
+            self._ema_ear = alpha_ear * ear + (1.0 - alpha_ear) * self._ema_ear
+        else:
+            self._ema_ear = ear
 
         # ── GAZE (EMA done here with time-based alpha) ───────────────────
         raw_gaze_ratio = gaze_ratio(lm)
-        self._ema_gaze = alpha_gaze * raw_gaze_ratio + (1.0 - alpha_gaze) * self._ema_gaze
+        if CFG.ema_enabled:
+            self._ema_gaze = alpha_gaze * raw_gaze_ratio + (1.0 - alpha_gaze) * self._ema_gaze
+        else:
+            self._ema_gaze = raw_gaze_ratio
         if self._ema_gaze > CFG.gaze_left_threshold:
             gaze = "LEFT"
         elif self._ema_gaze < CFG.gaze_right_threshold:
@@ -208,9 +214,11 @@ class DriverMonitor:
 
             if self.calibrated:
                 # Compute thresholds on completion
-                self._ear_threshold = (
-                    float(np.mean(self._ear_samples)) * CFG.ear_factor
-                )
+                calib_mean = float(np.mean(self._ear_samples))
+                if CFG.ear_fixed_threshold is not None:
+                    self._ear_threshold = CFG.ear_fixed_threshold
+                else:
+                    self._ear_threshold = calib_mean * CFG.ear_factor
                 self._pitch_neutral = float(np.mean(self._pitch_samples))
 
             state = "CALIBRATING"
@@ -219,8 +227,10 @@ class DriverMonitor:
         else:
             # Determine head-down from pitch relative to neutral baseline (degrees)
             pitch_delta = self._pitch_deg - self._pitch_neutral
+            exit_thresh = (CFG.head_enter_deg if not CFG.head_hysteresis_enabled
+                           else CFG.head_exit_deg)
             if self._head_down:
-                self._head_down = pitch_delta > CFG.head_exit_deg
+                self._head_down = pitch_delta > exit_thresh
             else:
                 self._head_down = pitch_delta > CFG.head_enter_deg
 

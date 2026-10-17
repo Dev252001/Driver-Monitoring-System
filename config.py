@@ -127,6 +127,25 @@ class Config:
     blink_reset_window_s: float = 30.0
     """Window duration for resetting the blink counter.  Unit: seconds."""
 
+    # ── Ablation flags (Phase 3 evaluation) ──────────────────────────────────
+    ema_enabled: bool = True
+    """If False, EAR and gaze EMA are bypassed (raw values used directly).
+    Ablation: tests the contribution of smoothing.  Default True = current behaviour."""
+
+    head_hysteresis_enabled: bool = True
+    """If False, head_exit_deg is set equal to head_enter_deg (no hysteresis).
+    Ablation: tests the contribution of pitch hysteresis.  Default True."""
+
+    use_yaw_for_gaze: bool = False
+    """If True, both yaw angle AND iris ratio must agree for LEFT/RIGHT alerts.
+    Default False = iris-only (current behaviour).
+    Ablation: tests whether adding yaw reduces false alarms."""
+
+    ear_fixed_threshold: float | None = None
+    """If set to a float, overrides the calibrated EAR threshold with this
+    fixed value.  Default None = use calibrated threshold (current behaviour).
+    Ablation: tests fixed (0.25) vs calibrated threshold."""
+
 
 # Module-level singleton — import and use CFG everywhere.
 CFG = Config()
