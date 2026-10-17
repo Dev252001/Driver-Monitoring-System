@@ -199,48 +199,7 @@ re-verify live after fix. Document threshold change in commit message.
 
 ## Phase 3 — Evaluation (branch: `polish/phase-3-evaluation`)
 
-**Goal:** produce real, reproducible numbers and honest error analysis.
-
-**Files:** `main.py` (add `--video`/`--headless` args), `scripts/evaluate.py`,
-`scripts/record_clip.py`, updated `logger.py` (structured JSONL),
-`docs/EVALUATION.md`, `results/*.json`.
-
-**Dataset notes:** to be supplied by the author in Phase 3. All datasets and
-videos of people are never committed to the repository.
-
-**`scripts/evaluate.py` design:**
-- Flags: `--video PATH --labels PATH --headless --subject-id ID`
-- Runs `DriverMonitor.process(frame, t=frame_index/fps)` for each frame.
-- Outputs per-frame CSV: `iso_time, subject_id, frame_id, ear, ema_ear,
-  threshold, state, gt_label`.
-- Computes: precision, recall, F1 (drowsy vs alert), detection delay,
-  false alarms per hour, per-frame latency mean/p95, PERCLOS estimate.
-- Ablations: fixed threshold (0.25) vs calibrated; with/without EMA;
-  with/without hysteresis; combined yaw+gaze vs gaze-only.
-- All metrics report 95% bootstrap CIs.
-- Saves `results/session_<date>_<subject_id>.json` with metrics + config +
-  git commit hash + library versions.
-
-**Structured log format (JSONL, one object per frame):**
-```json
-{"iso_time": "2026-09-01T10:00:00.123Z", "session_id": "s01", "subject_id": "dev",
- "frame": 42, "t": 1.4, "ear": 0.31, "ema_ear": 0.29, "threshold": 0.26,
- "gaze": "CENTER", "pitch_deg": -2.1, "yaw_deg": 1.3, "state": "ACTIVE",
- "fatigue": 98.5, "fps": 28.3}
-```
-
-**Error analysis conditions** (self-recorded, labelled by author):
-glasses, low light, head yaw >30°, partial occlusion, camera angle
-(below / above eye level).
-
-**Acceptance criteria:**
-```
-python scripts/evaluate.py --video clip.mp4 --labels clip_labels.csv --headless
-# prints metric table; saves results/session_*.json
-```
-
-**Effort:** L (~3 days) · **Risks:** Dataset access time; self-recorded clip
-is sufficient for application if scope is honest.
+See **[`docs/EVALUATION.md`](EVALUATION.md)** for the full protocol, definitions, limitations, and results table.
 
 ---
 

@@ -6,58 +6,46 @@ Python 3.10.11 · OpenCV · MediaPipe Face Mesh · NumPy · Pygame.
 
 ## Structure
 ```
-main.py          Live webcam loop (delegates all logic to DriverMonitor)
-monitor.py       DriverMonitor.process_landmarks(lm, t) → FrameResult pipeline
-detection.py     get_ear, gaze_ratio, get_head_pose (solvePnP)
-state.py         StateManager alert state machine
-audio.py         AudioPlayer, PygameAudio, NullAudio
-logger.py        EventLogger CSV logger
-config.py        Frozen Config dataclass — all thresholds with units
-sounds/          Alert audio files (.ogg after Phase 2 D3)
-tests/           Pytest unit tests (headless — no cv2/mediapipe/pygame at import)
-scripts/         smoke_check.py; evaluate.py + record_clip.py added in Phase 3
-docs/PLAN.md     Full phased plan and architectural decisions
-docs/EVALUATION.md  Error analysis (Phase 4)
-CHANGELOG.md     Behaviour-changing commits with before/after
-results/         Committed summary JSON; results/raw/ is git-ignored
-.github/workflows/ci.yml  ruff + pytest on every push/PR
+main.py               Live webcam loop (uses landmark_adapter + DriverMonitor)
+monitor.py            DriverMonitor.process_landmarks(lm, t, w, h) → FrameResult
+detection.py          get_ear(+pixel-space fix C1), gaze_ratio, get_head_pose
+landmark_adapter.py   Shared frame→landmarks adapter (main.py and extract.py)
+state.py              StateManager alert state machine
+audio.py              AudioPlayer, PygameAudio, NullAudio
+logger.py             EventLogger CSV logger
+config.py             Frozen Config dataclass — all thresholds with units + ablation flags
+evaluation/metrics.py Event-level and frame-level evaluation metrics (pure Python)
+evaluation/splits.csv Session split assignments (dev / test; anonymous IDs)
+scripts/record_clip.py  Labelled webcam recorder with cue schedule
+scripts/extract.py      Video → data/<stem>.npz (landmarks + timestamps)
+scripts/evaluate.py     .npz + labels → results/<run_id>.json (metrics + CIs)
+tests/                Pytest unit tests (headless — no cv2/mediapipe/pygame at import)
+docs/EVALUATION.md    Protocol, definitions, limitations, results table
+docs/PLAN.md          Phased plan and architectural decisions
+CHANGELOG.md          Behaviour-changing commits with before/after
+results/              Committed summary JSON; results/raw/ is git-ignored
+data/                 Recordings and extracted .npz — git-ignored
 ```
 
 ## Commands
 ```powershell
-# Run live
-.\venv\Scripts\python.exe main.py
-
-# Lint
-.\venv\Scripts\python.exe -m ruff check .
-
-# Test
-.\venv\Scripts\python.exe -m pytest tests/ -v
-
-# Smoke check (headless import + FaceMesh black-frame test)
-.\venv\Scripts\python.exe scripts/smoke_check.py
-
-# Install deps in a fresh venv
-python -m venv venv
-.\venv\Scripts\python.exe -m pip install -r requirements.txt
-.\venv\Scripts\python.exe -c "import cv2, mediapipe, numpy, pygame; print('OK')"
+py main.py                                                        # live
+py -m ruff check . && py -m pytest tests/ -v                     # lint+test
+py scripts/record_clip.py --subject S01 --session 1 --dry-run    # record
+py scripts/extract.py --video data/S01_1_day.mp4 --out data/S01_1_day.npz
+py scripts/evaluate.py --npz data/S01_1_day.npz --labels data/S01_1_day_labels.csv
 ```
 
 ## Commit convention (Conventional Commits)
-`fix:` bug fix  `feat:` new feature  `test:` tests  `docs:` docs  `chore:` tooling  `ci:` CI
-Scope = module name: `fix(state):`, `test(detection):`, `feat(monitor):`.
+`fix:` `feat:` `test:` `docs:` `chore:` `ci:`  Scope = module: `fix(monitor):`.
 
-## Branch convention
-One branch per phase: `polish/phase-N-<name>`. Never commit directly to `main`.
-Author pushes; never run `git push`, `git rebase`, `git reset --hard`,
-`git stash` or any force option.
-
-## Key architectural decisions (see docs/PLAN.md for details)
-- **Time injection:** every duration rule takes `t: float` from caller; live
-  uses `time.monotonic()`, offline uses `frame_index / fps`.
+## Key architectural decisions
+- **Time injection:** `t: float` from caller; live = `time.monotonic()`, offline = `frame_index/fps`.
 - **One pipeline:** `DriverMonitor.process_landmarks(lm, t, frame_w, frame_h) → FrameResult`.
-- **FPS-independent EMA:** `alpha = 1 - exp(-dt / tau)` — never a fixed alpha.
-- **Test-first:** failing test committed → fix in separate commit.
+- **Pixel-space EAR:** `get_ear` scales landmarks by `frame_w`/`frame_h` (C1 fix).
+- **Degree-based pitch:** `head_enter_deg=15°`, `head_exit_deg=10°` (C22 fix).
+- **FPS-independent EMA:** `alpha = 1 - exp(-dt / tau)`.
+- **Ablation flags** in Config: `ema_enabled`, `head_hysteresis_enabled`, `use_yaw_for_gaze`, `ear_fixed_threshold`.
 - **No fabricated numbers:** unrun metrics marked `NOT YET MEASURED`.
 - **Privacy:** no frames saved; logs contain numeric features only.
 
