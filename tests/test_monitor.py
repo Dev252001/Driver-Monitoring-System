@@ -76,11 +76,10 @@ def _closed_eye_lm() -> list[Any]:
 
 def _make_monitor(tmp_path: Path):
     """Return a calibrated DriverMonitor with NullAudio and a temp log."""
-    from monitor import DriverMonitor  # noqa: PLC0415
-
     from audio import NullAudio  # noqa: PLC0415
     from config import CFG  # noqa: PLC0415
     from logger import EventLogger  # noqa: PLC0415
+    from monitor import DriverMonitor  # noqa: PLC0415
 
     audio = NullAudio()
     log = EventLogger(log_path=tmp_path / "test_log.csv")
@@ -95,12 +94,12 @@ def _make_monitor(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Stage B1 — failing tests (must fail before monitor.py exists)
+# Stage B1 / C3 — FrameResult and DriverMonitor tests
 # ---------------------------------------------------------------------------
 
 
 class TestFrameResult:
-    """FrameResult must be a dataclass with the required fields."""
+    """FrameResult must be a dataclass with the required fields (incl. C3 additions)."""
 
     def test_frameresult_is_dataclass(self) -> None:
         from monitor import FrameResult  # noqa: PLC0415
@@ -108,11 +107,13 @@ class TestFrameResult:
         assert dataclasses.is_dataclass(FrameResult)
 
     def test_frameresult_has_required_fields(self) -> None:
+        """FrameResult must include pitch_deg and yaw_deg (added in Stage C3)."""
         from monitor import FrameResult  # noqa: PLC0415
 
         fields = {f.name for f in dataclasses.fields(FrameResult)}
         required = {
             "ear", "ema_ear", "threshold", "gaze", "head_down",
+            "pitch_deg", "yaw_deg",
             "state", "fatigue_score", "blink_count", "alert_fired",
         }
         missing = required - fields
@@ -123,7 +124,8 @@ class TestFrameResult:
 
         r = FrameResult(
             ear=0.30, ema_ear=0.28, threshold=0.22, gaze="CENTER",
-            head_down=False, state="ACTIVE", fatigue_score=100.0,
+            head_down=False, pitch_deg=0.0, yaw_deg=0.0,
+            state="ACTIVE", fatigue_score=100.0,
             blink_count=0, alert_fired=False,
         )
         assert r.state == "ACTIVE"
@@ -134,10 +136,9 @@ class TestDriverMonitorInit:
 
     def test_instantiates_without_cv2_or_mediapipe(self, tmp_path: Path) -> None:
         """Importing and instantiating DriverMonitor must not touch cv2/mediapipe."""
-        from monitor import DriverMonitor  # noqa: PLC0415
-
         from audio import NullAudio  # noqa: PLC0415
         from logger import EventLogger  # noqa: PLC0415
+        from monitor import DriverMonitor  # noqa: PLC0415
 
         audio = NullAudio()
         log = EventLogger(log_path=tmp_path / "init_log.csv")
@@ -145,10 +146,9 @@ class TestDriverMonitorInit:
         assert mon is not None
 
     def test_not_calibrated_at_init(self, tmp_path: Path) -> None:
-        from monitor import DriverMonitor  # noqa: PLC0415
-
         from audio import NullAudio  # noqa: PLC0415
         from logger import EventLogger  # noqa: PLC0415
+        from monitor import DriverMonitor  # noqa: PLC0415
 
         audio = NullAudio()
         log = EventLogger(log_path=tmp_path / "log.csv")
@@ -168,10 +168,9 @@ class TestProcessLandmarks:
         assert isinstance(result, FrameResult)
 
     def test_calibrating_state_during_calib(self, tmp_path: Path) -> None:
-        from monitor import DriverMonitor  # noqa: PLC0415
-
         from audio import NullAudio  # noqa: PLC0415
         from logger import EventLogger  # noqa: PLC0415
+        from monitor import DriverMonitor  # noqa: PLC0415
 
         audio = NullAudio()
         log = EventLogger(log_path=tmp_path / "log.csv")
@@ -275,11 +274,10 @@ class TestProcessLandmarks:
         )
 
     def test_no_alert_during_calibration(self, tmp_path: Path) -> None:
-        from monitor import DriverMonitor  # noqa: PLC0415
-
         from audio import NullAudio  # noqa: PLC0415
         from config import CFG  # noqa: PLC0415
         from logger import EventLogger  # noqa: PLC0415
+        from monitor import DriverMonitor  # noqa: PLC0415
 
         audio = NullAudio()
         log = EventLogger(log_path=tmp_path / "log.csv")
@@ -310,3 +308,19 @@ class TestProcessLandmarks:
             "DriverMonitor is using an internal clock instead of the injected t. "
             f"Got state={result.state} with frozen clock."
         )
+
+    def test_pitch_yaw_populated_after_calibration(self, tmp_path: Path) -> None:
+        """pitch_deg and yaw_deg must be present in FrameResult after Stage C3."""
+        mon, _, _ = _make_monitor(tmp_path)
+        lm = _open_eye_lm()
+        result = mon.process_landmarks(lm, 10.0)
+        # Both fields must exist and be finite floats
+        assert hasattr(result, "pitch_deg"), "FrameResult missing pitch_deg"
+        assert hasattr(result, "yaw_deg"), "FrameResult missing yaw_deg"
+        assert isinstance(result.pitch_deg, float), f"pitch_deg not float: {type(result.pitch_deg)}"
+        assert isinstance(result.yaw_deg, float), f"yaw_deg not float: {type(result.yaw_deg)}"
+        # Frontal face landmarks → angles should be roughly near zero
+        assert abs(result.pitch_deg) < 90.0, f"pitch_deg={result.pitch_deg} out of range"
+        assert abs(result.yaw_deg) < 90.0, f"yaw_deg={result.yaw_deg} out of range"
+
+
