@@ -1,5 +1,5 @@
 from audio import speak
-from config import COOLDOWN
+from config import CFG
 from logger import log_event
 
 last_alerts = {
@@ -12,11 +12,11 @@ last_alerts = {
 prev_state = "ACTIVE"
 stable_state = "ACTIVE"
 state_count = 0
+_stable_state_start: float = 0.0  # monotonic time when current stable_state began
 
-STABILITY_FRAMES = 5
 
-def handle_state(state, now, calibrated):
-    global prev_state, stable_state, state_count
+def handle_state(state: str, now: float, calibrated: bool) -> None:
+    global prev_state, stable_state, state_count, _stable_state_start
 
     if not calibrated or state in ["ACTIVE", "CALIBRATING"]:
         # reset so the next alert state is never silently skipped
@@ -32,9 +32,10 @@ def handle_state(state, now, calibrated):
     else:
         stable_state = state
         state_count = 1
+        _stable_state_start = now
 
-    # wait for stable frames
-    if state_count < STABILITY_FRAMES:
+    # wait for stability_duration_s (replaces old STABILITY_FRAMES=5)
+    if now - _stable_state_start < CFG.stability_duration_s:
         return
 
     # same state → ignore
@@ -43,7 +44,7 @@ def handle_state(state, now, calibrated):
 
     # DROWSY priority + cooldown
     if stable_state == "DROWSY":
-        if now - last_alerts["DROWSY"] > 2:   # shorter cooldown
+        if now - last_alerts["DROWSY"] > CFG.cooldown_drowsy_s:
             speak("DROWSY")
             log_event("DROWSY")
             last_alerts["DROWSY"] = now
@@ -51,7 +52,7 @@ def handle_state(state, now, calibrated):
         return
 
     # normal cooldown
-    if now - last_alerts[stable_state] > COOLDOWN:
+    if now - last_alerts[stable_state] > CFG.cooldown_other_s:
         speak(stable_state)
         log_event(stable_state)
         last_alerts[stable_state] = now

@@ -4,7 +4,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
-from config import CALIB_FRAMES, EAR_EMA_ALPHA, EAR_FACTOR, GAZE_HOLD_TIME
+from config import CFG
 from detection import get_ear, get_gaze, get_head
 from state import handle_state
 
@@ -63,7 +63,7 @@ while cap.isOpened():
             ear = (get_ear(lm,[33,160,158,133,153,144]) +
                    get_ear(lm,[362,385,387,263,373,380])) / 2
 
-            ema_ear = EAR_EMA_ALPHA * ear + (1 - EAR_EMA_ALPHA) * ema_ear
+            ema_ear = CFG.ear_ema_alpha * ear + (1 - CFG.ear_ema_alpha) * ema_ear
 
             # -------- GAZE --------
             gaze, ema_ratio = get_gaze(lm, ema_ratio)
@@ -75,20 +75,20 @@ while cap.isOpened():
             # print("HEAD_DIFF:", diff)
 
             # -------- CALIBRATION --------
-            if len(ear_samples) < CALIB_FRAMES:
+            if len(ear_samples) < CFG.calib_frames:
                 ear_samples.append(ear)
                 head_samples.append(diff)
                 state = "CALIBRATING"
 
-                if len(ear_samples) == CALIB_FRAMES:
+                if len(ear_samples) == CFG.calib_frames:
                     print("Calibration Complete")
 
             else:
-                EAR_THRESHOLD = np.mean(ear_samples) * EAR_FACTOR
+                EAR_THRESHOLD = np.mean(ear_samples) * CFG.ear_factor
                 HEAD_BASELINE = np.mean(head_samples)
 
                 # -------- DROWSY --------
-                if ema_ear < EAR_THRESHOLD * 1.1:
+                if ema_ear < EAR_THRESHOLD * CFG.ear_blink_multiplier:
 
                     if not prev_eye_closed:
                         blink_count += 1
@@ -97,7 +97,7 @@ while cap.isOpened():
                     if drowsy_start_time is None:
                         drowsy_start_time = now
 
-                    if now - drowsy_start_time > 1.5:
+                    if now - drowsy_start_time > CFG.ear_hold_s:
                         state = "DROWSY"
                     else:
                         state = "ACTIVE"
@@ -123,14 +123,14 @@ while cap.isOpened():
                             last_switch_time = now
                             gaze_start_time = now
 
-                        if gaze_switch_count >= 2 and (now - last_switch_time < 1.5):
+                        if gaze_switch_count >= CFG.gaze_switch_count and (now - last_switch_time < CFG.gaze_switch_window_s):
                             turn_mode = True
                             turn_start_time = now
 
                         if turn_mode:
                             state = "ACTIVE"
                         else:
-                            if now - gaze_start_time > GAZE_HOLD_TIME:
+                            if now - gaze_start_time > CFG.gaze_hold_s:
                                 state = gaze
                             else:
                                 state = "ACTIVE"
@@ -145,10 +145,11 @@ while cap.isOpened():
                         state = "ACTIVE"
 
             # -------- TURN EXIT --------
-            if turn_mode and (now - turn_start_time > 2):
+            if turn_mode and (now - turn_start_time > CFG.turn_mode_exit_s):
                 turn_mode = False
 
             # -------- FATIGUE --------
+            # NOTE: still per-frame deltas here (bug C12); converted to per-second in Phase 2 C6.
             if state == "DROWSY":
                 fatigue_score -= 2
             elif state in ["LEFT", "RIGHT", "DOWN"]:
@@ -157,11 +158,11 @@ while cap.isOpened():
                 fatigue_score += 0.5
 
             # blink reset every 30 sec
-            if now - last_blink_reset > 30:
+            if now - last_blink_reset > CFG.blink_reset_window_s:
                 blink_count = 0
                 last_blink_reset = now
 
-            if blink_count > 20:
+            if blink_count > CFG.blink_high_threshold:
                 fatigue_score -= 0.2
 
             fatigue_score = max(0, min(100, fatigue_score))
@@ -173,7 +174,7 @@ while cap.isOpened():
             attention_gap = now - last_active_time
 
             # -------- ALERT --------
-            handle_state(state, now, len(ear_samples) >= CALIB_FRAMES)
+            handle_state(state, now, len(ear_samples) >= CFG.calib_frames)
 
             # -------- UI --------
             color = (0,255,0) if state in ["ACTIVE","CALIBRATING"] else (0,0,255)
