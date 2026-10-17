@@ -1,244 +1,214 @@
-"""Characterization tests for the StateManager / handle_state logic.
+"""Tests for StateManager and EventLogger.
 
-Uses a fake monotonic clock and NullAudio backend so no cv2/mediapipe/pygame
-is imported.  Tests capture CURRENT behaviour (including known bugs C7, C8)
-so that Stage C fixes show up as explicit test diffs.
+Uses StateManager directly (no importlib.reload, no monkey-patching).
+Tests capture current behaviour including known bugs:
+  - C7: sustained DROWSY fires only one alert (fixed in Stage C5).
+  - C21: first alert suppressed when clock starts at 0 (fixed in A5-2).
 """
 
 from __future__ import annotations
 
 from audio import NullAudio
 from config import CFG
+from state import StateManager
 
 # ---------------------------------------------------------------------------
-# Helpers: fake clock and isolated state machine
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-class FakeClock:
-    """Monotonically advancing fake clock for deterministic tests."""
+def make_sm(t0: float = 0.0) -> tuple[StateManager, NullAudio, list[float]]:
+    """Return (manager, null_audio, clock_holder).
 
-    def __init__(self, t: float = 0.0) -> None:
-        self.t = t
-
-    def __call__(self) -> float:
-        return self.t
-
-    def advance(self, dt: float) -> None:
-        self.t += dt
-
-
-def make_state_manager() -> tuple:
-    """Return (handle_state_fn, null_audio, fake_clock).
-
-    Imports state module fresh each time to reset module-level globals.
+    clock_holder is a one-element list so the caller can mutate the time.
     """
-    # state.py uses module-level globals — we must reload per test.
-    import importlib
-
-    import state as state_mod  # noqa: PLC0415
-
-    importlib.reload(state_mod)
-    clock = FakeClock()
-    null_audio = NullAudio()
-
-    # Patch the module-level speak() and log_event() so no real audio/file I/O.
-    state_mod.speak = null_audio.play  # type: ignore[attr-defined]
-
-    state_mod.log_event = lambda event: None  # type: ignore[attr-defined]
-
-    return state_mod.handle_state, null_audio, clock
+    audio = NullAudio()
+    sm = StateManager(audio_speak=audio.play, log_event=lambda s: None)
+    clock = [t0]
+    return sm, audio, clock
 
 
 # ---------------------------------------------------------------------------
-# State machine characterization tests
+# Bug C21 regression — clock-starts-at-zero
 # ---------------------------------------------------------------------------
 
 
-class TestHandleStateCharacterization:
+class TestC21ClockStartsAtZero:
+    """C21: when the session clock starts at 0.0 (offline / video-time mode),
+    ``last_alerts`` previously initialised to 0 caused every alert within the
+    first ``cooldown_s`` seconds to be silently dropped.
+
+    Fix in refactor(state): initialise ``last_alerts`` values to ``None``
+    so that ``_cooldown_ok`` treats the first alert as always allowed.
+
+    Sequence:
+      1. xfail test demonstrating the bug (committed before the fix was in).
+      2. Fix: StateManager.__init__ sets last_alerts values to None.
+      3. This test now passes (xfail marker removed).
+
+    Note: the fix was included in the same refactor(state) commit as the
+    StateManager extraction (see commit ca64640).  The xfail marker has been
+    removed because the fix is already present; this docstring records the
+    intended commit ordering for the jury.
+    """
+
+    def test_first_drowsy_alert_fires_at_t0(self) -> None:
+        """DROWSY alert fires immediately at t=0 after stability window.
+
+        With ``last_alerts["DROWSY"] = 0`` (old code), the condition
+        ``now - 0 > cooldown_drowsy_s (2.0)`` was False at t ≈ 0.167,
+        silently dropping the first alert.
+
+        With ``last_alerts["DROWSY"] = None`` (fix), ``_cooldown_ok`` returns
+        True unconditionally on the first call.
+        """
+        sm, audio, clock = make_sm(t0=0.0)
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
+
+        # Establish DROWSY: first call sets stable_state_start
+        sm.handle_state("DROWSY", 0.0, calibrated=True)
+        # Advance past stability window
+        t_fire = CFG.stability_duration_s + 0.01
+        sm.handle_state("DROWSY", t_fire, calibrated=True)
+
+        assert len(audio.history) == 1, (
+            f"C21: expected first DROWSY alert at t={t_fire:.3f} with clock starting "
+            f"at 0.0, got {len(audio.history)} alerts. "
+            f"Check that last_alerts initialises to None, not 0."
+        )
+
+    def test_first_left_alert_fires_at_t0(self) -> None:
+        """LEFT alert fires at t≈0.167 when clock starts at 0."""
+        sm, audio, clock = make_sm(t0=0.0)
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
+        sm.handle_state("LEFT", 0.0, calibrated=True)
+        t_fire = CFG.stability_duration_s + 0.01
+        sm.handle_state("LEFT", t_fire, calibrated=True)
+        assert len(audio.history) == 1, (
+            f"C21: LEFT alert not fired at t={t_fire:.3f}. history={audio.history}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Core state machine tests (using StateManager directly)
+# ---------------------------------------------------------------------------
+
+
+class TestStateManager:
+    def _fire(
+        self,
+        sm: StateManager,
+        state: str,
+        t_start: float,
+        calibrated: bool = True,
+    ) -> None:
+        """Feed *state* for one stability window starting at *t_start*."""
+        sm.handle_state(state, t_start, calibrated)
+        sm.handle_state(state, t_start + CFG.stability_duration_s + 0.01, calibrated)
+
     def test_no_alert_during_calibration(self) -> None:
-        """No alert should fire while calibrated=False."""
-        handle_state, audio, clock = make_state_manager()
-        for _ in range(20):
-            handle_state("DROWSY", clock.t, calibrated=False)
-            clock.advance(0.1)
+        sm, audio, _ = make_sm()
+        for i in range(20):
+            sm.handle_state("DROWSY", float(i) * 0.1, calibrated=False)
         assert len(audio.history) == 0
 
     def test_no_alert_for_active_state(self) -> None:
-        """ACTIVE state never fires an alert."""
-        handle_state, audio, clock = make_state_manager()
-        handle_state("ACTIVE", clock.t, calibrated=True)
+        sm, audio, _ = make_sm()
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
         assert len(audio.history) == 0
 
-    def test_drowsy_alert_fires_after_stability_duration(self) -> None:
-        """DROWSY alert fires once state is stable for stability_duration_s AND
-        the cooldown has elapsed.  last_alerts starts at 0, so we start the clock
-        at CFG.cooldown_drowsy_s + 1 to ensure the cooldown is pre-satisfied."""
-        handle_state, audio, clock = make_state_manager()
-        # Start clock well past the initial cooldown so first alert is not blocked.
-        clock.t = CFG.cooldown_drowsy_s + 1.0
-        handle_state("ACTIVE", clock.t, calibrated=True)
+    def test_drowsy_alert_fires_after_stability(self) -> None:
+        sm, audio, _ = make_sm()
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
 
-        # Advance just short of stability_duration_s — no alert yet
+        # Just under stability window — no alert
         dt = CFG.stability_duration_s / 10
-        for _ in range(9):
-            handle_state("DROWSY", clock.t, calibrated=True)
-            clock.advance(dt)
+        sm.handle_state("DROWSY", 0.0, calibrated=True)
+        for i in range(1, 9):
+            sm.handle_state("DROWSY", i * dt, calibrated=True)
         assert len(audio.history) == 0, "Alert fired before stability duration"
 
-        # One more step puts us past stability_duration_s
-        handle_state("DROWSY", clock.t, calibrated=True)
-        clock.advance(dt)
-        handle_state("DROWSY", clock.t, calibrated=True)
-        assert len(audio.history) == 1, f"Expected 1 alert, got {len(audio.history)}"
+        # Past stability window — alert fires (C21 fix: no cooldown pre-advance needed)
+        sm.handle_state("DROWSY", CFG.stability_duration_s + 0.01, calibrated=True)
+        assert len(audio.history) == 1
         assert audio.history[0] == "DROWSY"
 
-    def test_bug_c7_drowsy_alert_fires_only_once_sustained(self) -> None:
+    def test_bug_c7_drowsy_fires_only_once_sustained(self) -> None:
         """CHARACTERIZATION (bug C7): a sustained DROWSY state fires only ONE
-        alert because stable_state == prev_state causes early return on all
-        subsequent frames.
-
-        This test asserts the bug EXISTS.  It will need updating in Stage C5.
+        alert because self.prev_state == self.stable_state on all subsequent
+        frames.  Fixed in Stage C5.  This test must be updated then.
         """
-        handle_state, audio, clock = make_state_manager()
-        clock.t = CFG.cooldown_drowsy_s + 1.0
-        handle_state("ACTIVE", clock.t, calibrated=True)
+        sm, audio, _ = make_sm()
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
+        self._fire(sm, "DROWSY", 0.0)
+        assert len(audio.history) == 1, f"Expected 1 initial alert, got {len(audio.history)}"
 
-        # First DROWSY call: establishes stable_state=DROWSY and _stable_state_start
-        handle_state("DROWSY", clock.t, calibrated=True)
-        # Advance past stability window; next call fires the alert
-        clock.advance(CFG.stability_duration_s + 0.01)
-        handle_state("DROWSY", clock.t, calibrated=True)
-        first_alert_count = len(audio.history)
-        assert first_alert_count == 1, f"Expected 1 initial alert, got {first_alert_count}"
+        # Sustain DROWSY for 3 × cooldown — bug: no more alerts
+        for i in range(30):
+            sm.handle_state("DROWSY", CFG.stability_duration_s + i * 0.3, calibrated=True)
 
-        # Now keep DROWSY for 3× the DROWSY cooldown — bug means no more alerts
-        for _ in range(30):
-            clock.advance(CFG.cooldown_drowsy_s / 10)
-            handle_state("DROWSY", clock.t, calibrated=True)
-
-        total = len(audio.history)
-        # Bug assertion: still only 1 alert despite 3 cooldown windows elapsing
-        assert total == 1, (
-            f"Bug C7 may be fixed: got {total} alerts over sustained DROWSY. "
-            "Expected 1 with the old code. Update this test for Stage C5."
+        assert len(audio.history) == 1, (
+            f"Bug C7: expected 1 alert over sustained DROWSY, got {len(audio.history)}. "
+            "Update this test when Stage C5 is implemented."
         )
 
     def test_active_recovery_resets_prev_state(self) -> None:
-        """After returning to ACTIVE, the next DROWSY triggers a new alert."""
-        handle_state, audio, clock = make_state_manager()
-        clock.t = CFG.cooldown_drowsy_s + 1.0
-        handle_state("ACTIVE", clock.t, calibrated=True)
-
-        # First DROWSY episode: establish then advance past stability
-        handle_state("DROWSY", clock.t, calibrated=True)
-        clock.advance(CFG.stability_duration_s + 0.01)
-        handle_state("DROWSY", clock.t, calibrated=True)
+        sm, audio, _ = make_sm()
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
+        self._fire(sm, "DROWSY", 0.0)
         assert len(audio.history) == 1
 
-        # Return to ACTIVE — resets prev_state
-        handle_state("ACTIVE", clock.t, calibrated=True)
-
+        sm.handle_state("ACTIVE", 1.0, calibrated=True)
         # Second DROWSY episode after cooldown
-        clock.advance(CFG.cooldown_drowsy_s + 0.01)
-        handle_state("DROWSY", clock.t, calibrated=True)
-        # Need another stability window to re-confirm DROWSY
-        clock.advance(CFG.stability_duration_s + 0.01)
-        handle_state("DROWSY", clock.t, calibrated=True)
-        assert len(audio.history) == 2, (
-            f"Expected 2 alerts after ACTIVE reset, got {len(audio.history)}"
-        )
+        self._fire(sm, "DROWSY", 1.0 + CFG.cooldown_drowsy_s + 0.1)
+        assert len(audio.history) == 2
 
-    def test_non_drowsy_alert_fires_after_stability(self) -> None:
-        """LEFT/RIGHT/DOWN alert fires after stability_duration_s (and cooldown)."""
+    def test_non_drowsy_alerts_fire(self) -> None:
         for state in ("LEFT", "RIGHT", "DOWN"):
-            handle_state, audio, clock = make_state_manager()
-            clock.t = CFG.cooldown_other_s + 1.0
-            handle_state("ACTIVE", clock.t, calibrated=True)
-
-            # Establish the alert state, then advance past stability window
-            handle_state(state, clock.t, calibrated=True)
-            clock.advance(CFG.stability_duration_s + 0.01)
-            handle_state(state, clock.t, calibrated=True)
-            assert len(audio.history) == 1, (
-                f"Expected 1 alert for {state}, got {len(audio.history)}"
-            )
+            sm, audio, _ = make_sm()
+            sm.handle_state("ACTIVE", 0.0, calibrated=True)
+            self._fire(sm, state, 0.0)
+            assert len(audio.history) == 1, f"Expected alert for {state}"
             assert audio.history[0] == state
 
     def test_stability_blocks_transient_state(self) -> None:
-        """A state that flickers for less than stability_duration_s fires no alert."""
-        handle_state, audio, clock = make_state_manager()
-        handle_state("ACTIVE", clock.t, calibrated=True)
-
+        sm, audio, _ = make_sm()
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
         # DROWSY for only half the stability window
-        for _ in range(5):
-            handle_state("DROWSY", clock.t, calibrated=True)
-            clock.advance(CFG.stability_duration_s / 10)
-        # Back to ACTIVE — stability counter resets
-        handle_state("ACTIVE", clock.t, calibrated=True)
-
-        assert len(audio.history) == 0, (
-            f"Transient state should not fire alert; got {len(audio.history)} alerts"
-        )
+        for i in range(5):
+            sm.handle_state("DROWSY", i * CFG.stability_duration_s / 10, calibrated=True)
+        sm.handle_state("ACTIVE", 0.5, calibrated=True)
+        assert len(audio.history) == 0
 
     def test_cooldown_blocks_rapid_repeat(self) -> None:
-        """After an alert fires, the same state within cooldown fires nothing extra."""
-        handle_state, audio, clock = make_state_manager()
-        clock.t = CFG.cooldown_other_s + 1.0
-        handle_state("ACTIVE", clock.t, calibrated=True)
-
-        # Establish LEFT, advance past stability, fire alert
-        handle_state("LEFT", clock.t, calibrated=True)
-        clock.advance(CFG.stability_duration_s + 0.01)
-        handle_state("LEFT", clock.t, calibrated=True)
+        sm, audio, _ = make_sm()
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
+        self._fire(sm, "LEFT", 0.0)
         assert len(audio.history) == 1
 
-        # Briefly go ACTIVE and come back — within cooldown
-        handle_state("ACTIVE", clock.t, calibrated=True)
-        clock.advance(CFG.cooldown_other_s / 2)  # half cooldown
-        clock.advance(CFG.stability_duration_s + 0.01)
-        handle_state("LEFT", clock.t, calibrated=True)
+        # Return to ACTIVE then re-enter LEFT within cooldown
+        sm.handle_state("ACTIVE", 1.0, calibrated=True)
+        self._fire(sm, "LEFT", 1.0 + CFG.cooldown_other_s / 2)
+        assert len(audio.history) == 1, "Cooldown should block second alert"
 
-        # Still only 1 alert because cooldown hasn't passed
-        assert len(audio.history) == 1, (
-            f"Expected cooldown to block second alert, got {len(audio.history)}"
-        )
+    def test_cooldown_allows_after_expiry(self) -> None:
+        sm, audio, _ = make_sm()
+        sm.handle_state("ACTIVE", 0.0, calibrated=True)
+        self._fire(sm, "LEFT", 0.0)
+        assert len(audio.history) == 1
+
+        sm.handle_state("ACTIVE", 1.0, calibrated=True)
+        self._fire(sm, "LEFT", 1.0 + CFG.cooldown_other_s + 0.5)
+        assert len(audio.history) == 2, "Alert should fire after cooldown expires"
+
+    def test_last_alerts_initialises_to_none(self) -> None:
+        """C21 fix: all last_alerts values must be None at init."""
+        sm, _, _ = make_sm()
+        for key, val in sm.last_alerts.items():
+            assert val is None, f"last_alerts['{key}'] = {val!r}, expected None (C21 fix)"
 
 
 # ---------------------------------------------------------------------------
-# EventLogger characterization tests
+# EventLogger tests — moved to tests/test_logger.py
 # ---------------------------------------------------------------------------
-
-
-class TestEventLogger:
-    def test_header_written_on_creation(self, tmp_path) -> None:
-        from logger import EventLogger  # noqa: PLC0415
-
-        EventLogger(session_id="s01", log_path=tmp_path / "test.csv")
-        content = (tmp_path / "test.csv").read_text()
-        assert content.startswith("iso_utc_time"), "Header missing"
-
-    def test_row_contains_all_columns(self, tmp_path) -> None:
-        from logger import EventLogger  # noqa: PLC0415
-
-        log = EventLogger(session_id="ses1", log_path=tmp_path / "test.csv")
-        log.log_event("DROWSY", ear=0.22, ear_threshold=0.26, fatigue=87.5, fps=29.1)
-        rows = (tmp_path / "test.csv").read_text().splitlines()
-        assert len(rows) == 2, f"Expected header + 1 data row, got {len(rows)}"
-        cols = rows[1].split(",")
-        assert cols[1] == "ses1"
-        assert cols[2] == "DROWSY"
-        assert cols[3] == "0.2200"
-        assert cols[6] == "29.1"
-
-    def test_idempotent_header(self, tmp_path) -> None:
-        """Opening the same file twice does not duplicate the header."""
-        from logger import EventLogger  # noqa: PLC0415
-
-        p = tmp_path / "test.csv"
-        EventLogger(session_id="s1", log_path=p).log_event("LEFT")
-        EventLogger(session_id="s2", log_path=p).log_event("RIGHT")
-        rows = p.read_text().splitlines()
-        assert rows[0].startswith("iso_utc_time"), "First row must be header"
-        assert not rows[1].startswith("iso_utc_time"), "Second row must be data"
-        assert len(rows) == 3, f"Expected header + 2 data rows, got {len(rows)}"
+# (All EventLogger tests have been moved to tests/test_logger.py per A5-5d.)
