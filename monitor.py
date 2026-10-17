@@ -198,11 +198,22 @@ class DriverMonitor:
         else:
             self._ema_gaze = raw_gaze_ratio
         if self._ema_gaze > CFG.gaze_left_threshold:
-            gaze = "LEFT"
+            iris_gaze = "LEFT"
         elif self._ema_gaze < CFG.gaze_right_threshold:
-            gaze = "RIGHT"
+            iris_gaze = "RIGHT"
         else:
-            gaze = "CENTER"
+            iris_gaze = "CENTER"
+
+        if CFG.use_yaw_for_gaze and iris_gaze in ("LEFT", "RIGHT"):
+            # Require yaw to agree with iris direction (reduces false alarms).
+            # yaw_deg > 0 = head right (driver), < 0 = head left (driver).
+            yaw_agrees = (
+                (iris_gaze == "RIGHT" and self._yaw_deg > 0)
+                or (iris_gaze == "LEFT"  and self._yaw_deg < 0)
+            )
+            gaze = iris_gaze if yaw_agrees else "CENTER"
+        else:
+            gaze = iris_gaze
 
         # ── HEAD POSE (cv2.solvePnP) ─────────────────────────────────────
         self._pitch_deg, self._yaw_deg = get_head_pose(lm, frame_w, frame_h)
