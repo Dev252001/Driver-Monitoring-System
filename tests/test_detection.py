@@ -441,3 +441,145 @@ class TestGetHead:
         _, diff = get_head(lm, baseline=None)
         expected = 0.60 - (0.35 + 0.45) / 2
         assert abs(diff - expected) < 1e-6, f"Expected {expected:.4f}, got {diff:.4f}"
+
+
+# ---------------------------------------------------------------------------
+# get_head_pose — solvePnP-based head pose (Stage C3/C4)
+# ---------------------------------------------------------------------------
+
+
+class TestGetHeadPose:
+    """Tests for the new get_head_pose(lm, frame_w, frame_h) → (pitch_deg, yaw_deg).
+
+    Uses cv2.solvePnP with a standard 6-point 3D face model.  The function
+    must be importable without side effects (cv2 is imported lazily inside the
+    function body, not at module level).
+
+    Coordinate conventions (after cv2.flip, mirrored frame):
+      pitch_deg > 0 → head tilted DOWN  (nose moves toward chin)
+      pitch_deg < 0 → head tilted UP
+      yaw_deg   > 0 → head turned RIGHT (driver's right)
+      yaw_deg   < 0 → head turned LEFT  (driver's left)
+
+    Test strategy: construct synthetic 2D projections by projecting the 3D
+    model points through a known camera matrix, then verify that
+    get_head_pose recovers the expected angles.
+    """
+
+    # Standard 6-point 3D face model (mm, camera-aligned coords).
+    # Indices: nose=1, chin=152, right-eye=33, left-eye=263, r-mouth=61, l-mouth=291
+    _MODEL_3D = [
+        (  0.0,    0.0,    0.0),   # nose tip
+        (  0.0,  -63.6,  -12.5),   # chin
+        ( 43.3,   32.7,  -26.0),   # right-eye outer (image right, driver left)
+        (-43.3,   32.7,  -26.0),   # left-eye outer  (image left,  driver right)
+        ( 28.9,  -28.9,  -24.1),   # right mouth corner
+        (-28.9,  -28.9,  -24.1),   # left  mouth corner
+    ]
+    _LM_INDICES = [1, 152, 33, 263, 61, 291]
+
+    def _project_to_lm(
+        self,
+        rvec,
+        tvec,
+        cam_matrix,
+        frame_w: int = 640,
+        frame_h: int = 480,
+    ) -> list[Any]:
+        """Project 3D model points through a rotation/translation and return
+        a landmark list with the resulting normalised coordinates."""
+        import cv2  # noqa: PLC0415
+
+        model_pts = __import__("numpy").array(self._MODEL_3D, dtype="float64")
+        pts_2d, _ = cv2.projectPoints(model_pts, rvec, tvec, cam_matrix, None)
+        lm = make_lm()
+        for idx, lm_i in enumerate(self._LM_INDICES):
+            px, py = pts_2d[idx, 0]
+            set_lm(lm, lm_i, float(px) / frame_w, float(py) / frame_h)
+        return lm
+
+    def _make_frontal_rvec_tvec(self):
+        """Rotation and translation for a frontal (0°, 0°) face at z=500 mm."""
+        import numpy as np  # noqa: PLC0415
+
+        rvec = np.zeros((3, 1), dtype="float64")   # no rotation
+        tvec = np.array([[0.0], [0.0], [500.0]])   # 500 mm ahead
+        return rvec, tvec
+
+    def _cam_matrix(self, frame_w: int = 640, frame_h: int = 480):
+        """Approximate camera matrix: focal = max(w,h), pp = centre."""
+        import numpy as np  # noqa: PLC0415
+
+        f = float(max(frame_w, frame_h))
+        return np.array([
+            [f, 0, frame_w / 2],
+            [0, f, frame_h / 2],
+            [0, 0,           1],
+        ], dtype="float64")
+
+    def test_frontal_face_near_zero_pitch_yaw(self) -> None:
+        """Frontal face (rvec=0) → pitch ≈ 0°, yaw ≈ 0°."""
+        from detection import get_head_pose  # noqa: PLC0415
+
+        rvec, tvec = self._make_frontal_rvec_tvec()
+        cam = self._cam_matrix()
+        lm = self._project_to_lm(rvec, tvec, cam)
+
+        pitch, yaw = get_head_pose(lm, frame_w=640, frame_h=480)
+        assert abs(pitch) < 5.0, f"Expected pitch ≈ 0°, got {pitch:.2f}°"
+        assert abs(yaw) < 5.0, f"Expected yaw ≈ 0°, got {yaw:.2f}°"
+
+    def test_head_down_gives_positive_pitch(self) -> None:
+        """Downward pitch rotation → pitch_deg > 0."""
+        import numpy as np  # noqa: PLC0415
+
+        from detection import get_head_pose  # noqa: PLC0415
+
+        # 20° downward pitch (rotation around x-axis, positive = down)
+        angle = 20.0 * np.pi / 180
+        rvec = np.array([[angle], [0.0], [0.0]])
+        tvec = np.array([[0.0], [0.0], [500.0]])
+        cam = self._cam_matrix()
+        lm = self._project_to_lm(rvec, tvec, cam)
+
+        pitch, yaw = get_head_pose(lm, frame_w=640, frame_h=480)
+        assert pitch > 10.0, f"Expected pitch > 10° for downward head, got {pitch:.2f}°"
+        assert abs(yaw) < 10.0, f"Expected yaw ≈ 0° for no-yaw rotation, got {yaw:.2f}°"
+
+    def test_head_right_gives_positive_yaw(self) -> None:
+        """Rightward yaw rotation → yaw_deg > 0."""
+        import numpy as np  # noqa: PLC0415
+
+        from detection import get_head_pose  # noqa: PLC0415
+
+        # 20° rightward yaw (rotation around y-axis, positive = right)
+        angle = 20.0 * np.pi / 180
+        rvec = np.array([[0.0], [angle], [0.0]])
+        tvec = np.array([[0.0], [0.0], [500.0]])
+        cam = self._cam_matrix()
+        lm = self._project_to_lm(rvec, tvec, cam)
+
+        pitch, yaw = get_head_pose(lm, frame_w=640, frame_h=480)
+        assert yaw > 10.0, f"Expected yaw > 10° for rightward head, got {yaw:.2f}°"
+        assert abs(pitch) < 10.0, f"Expected pitch ≈ 0° for no-pitch rotation, got {pitch:.2f}°"
+
+    def test_returns_floats(self) -> None:
+        """get_head_pose returns (float, float)."""
+        from detection import get_head_pose  # noqa: PLC0415
+
+        rvec, tvec = self._make_frontal_rvec_tvec()
+        cam = self._cam_matrix()
+        lm = self._project_to_lm(rvec, tvec, cam)
+        pitch, yaw = get_head_pose(lm, frame_w=640, frame_h=480)
+        assert isinstance(pitch, float)
+        assert isinstance(yaw, float)
+
+    def test_importable_without_cv2_at_collection(self) -> None:
+        """get_head_pose must be importable without cv2 at module-collection time.
+        This test just verifies the function exists; cv2 is lazy-loaded inside it.
+        """
+        import detection  # noqa: PLC0415
+
+        assert hasattr(detection, "get_head_pose"), (
+            "get_head_pose not found in detection module"
+        )
