@@ -133,23 +133,36 @@ class TestStateManager:
         assert len(audio.history) == 1
         assert audio.history[0] == "DROWSY"
 
-    def test_bug_c7_drowsy_fires_only_once_sustained(self) -> None:
-        """CHARACTERIZATION (bug C7): a sustained DROWSY state fires only ONE
-        alert because self.prev_state == self.stable_state on all subsequent
-        frames.  Fixed in Stage C5.  This test must be updated then.
+    def test_drowsy_repeats_while_sustained(self) -> None:
+        """C7 fix: a sustained DROWSY state fires repeated alerts separated by
+        cooldown_drowsy_s.
+
+        Sequence:
+          t=0.167 (stability_duration_s+0.01): first alert fires
+          t=2.2  (> cooldown_drowsy_s=2.0):   second alert fires
+          t=4.4  (> 2 × cooldown):             third alert fires
+
+        Before fix (transition guard): only 1 alert ever fired.
+        After fix (cooldown-only gate): alert repeats every cooldown_drowsy_s.
         """
         sm, audio, _ = make_sm()
         sm.handle_state("ACTIVE", 0.0, calibrated=True)
-        self._fire(sm, "DROWSY", 0.0)
-        assert len(audio.history) == 1, f"Expected 1 initial alert, got {len(audio.history)}"
 
-        # Sustain DROWSY for 3 × cooldown — bug: no more alerts
-        for i in range(30):
-            sm.handle_state("DROWSY", CFG.stability_duration_s + i * 0.3, calibrated=True)
+        # First alert: stability window passes at t ≈ 0.177
+        t_fire = CFG.stability_duration_s + 0.01
+        sm.handle_state("DROWSY", 0.0, calibrated=True)
+        sm.handle_state("DROWSY", t_fire, calibrated=True)
+        assert len(audio.history) == 1, f"Expected 1st alert at t={t_fire:.3f}"
 
-        assert len(audio.history) == 1, (
-            f"Bug C7: expected 1 alert over sustained DROWSY, got {len(audio.history)}. "
-            "Update this test when Stage C5 is implemented."
+        # Sustain DROWSY past two more cooldown windows
+        for i in range(50):
+            t = t_fire + (i + 1) * 0.12   # steps of 0.12 s → covers > 6 s
+            sm.handle_state("DROWSY", t, calibrated=True)
+
+        # With cooldown=2.0 s and 6 s of sustained DROWSY, expect ≥ 3 alerts
+        assert len(audio.history) >= 3, (
+            f"C7 fix: expected ≥ 3 alerts during sustained DROWSY "
+            f"(cooldown={CFG.cooldown_drowsy_s}s), got {len(audio.history)}."
         )
 
     def test_active_recovery_resets_prev_state(self) -> None:
