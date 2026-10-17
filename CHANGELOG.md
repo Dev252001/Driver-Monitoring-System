@@ -5,6 +5,80 @@ order. Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — branch `polish/phase-2-correctness` (Stages C–D)
+
+### Fixed — `ffe8708` `chore(sounds): convert alert sounds mp3->wav (D3)`
+
+**Bug C16 — MP3 not guaranteed cross-platform**
+
+- **Before:** `sounds/*.mp3` loaded by pygame; SDL2's MP3 support is optional
+  and silently broken on some Linux builds.
+- **After:** `sounds/*.wav` added (44100 Hz, 16-bit, mono); `AudioPlayer`
+  tries `.ogg → .wav → .mp3`; the `.wav` files are found first so no
+  MP3-deprecation warning fires at runtime.
+
+---
+
+### Fixed — `cb4fe55` `fix(config,detection,monitor): FPS-independent EMA (C7)`
+
+**Bug C7i — fixed EMA alpha is FPS-dependent**
+
+- **Before:** `CFG.ear_ema_alpha = 0.4` applied per-frame regardless of dt,
+  so the effective time constant doubled at 15 FPS vs 30 FPS.
+- **After:** `alpha = 1 - exp(-dt / tau)` computed per-frame.
+  `tau_ear_s = 0.0653 s` reproduces `alpha = 0.400` at 30 FPS.
+  `tau_gaze_s = 0.0935 s` reproduces `alpha = 0.300` at 30 FPS.
+  Step-response test: values at t = step + tau agree within 2% at 15/30/60 FPS.
+- **Removed:** `CFG.ear_ema_alpha`, `CFG.gaze_ema_alpha`.
+- **Added:** `CFG.tau_ear_s`, `CFG.tau_gaze_s`.
+
+---
+
+### Fixed — `74462f2` `fix(state): remove transition guard (C7)`
+
+**Bug C7 — DROWSY alert fires only once for sustained state (safety issue)**
+
+- **Before:** transition guard `if stable_state == prev_state: return` blocked
+  all repeat alerts — a driver who stayed DROWSY received exactly 1 alert ever.
+- **After:** guard removed; cooldown (`cooldown_drowsy_s = 2 s`) rate-limits
+  repeats.  A sustained 6 s DROWSY episode now fires 3 alerts.
+
+---
+
+### Fixed — `97d596e` + `3b9bfb1` `fix(detection): gaze corner swap + C1 docs (C2, C1)`
+
+**Bug C2 — gaze corners swapped between eyes**
+
+- **Before:** left iris (474-477) normalised against right eye corners (33, 133);
+  right iris (469-472) against left eye corners (362, 263).  On asymmetric eyes
+  (right width=0.09, left width=0.11) with centred irises, raw ratio = 0.6919
+  instead of 0.500 — enough to trigger a spurious LEFT alert.
+- **After:** each iris normalised against its own eye's corners.
+  Centred irises give raw = 0.500 for any eye-width asymmetry.
+
+**Finding C1 — EAR aspect-ratio dependence (documented)**
+
+- Added to `get_ear()` docstring: on non-square sensors (640×480 vs 1280×720)
+  the same physical eye produces different EAR values.  Mitigation: per-driver
+  calibration normalises the threshold to each driver's own distribution.
+
+---
+
+### Fixed — `69c8682` `feat(detection): get_head_pose() via cv2.solvePnP (C3/C4)`
+
+**Finding C5 — head-down normalised y-heuristic replaced by real pose estimation**
+
+- **Before:** `get_head()` compared normalised y-coords — scale-dependent and
+  sensitive to face distance.
+- **After:** `get_head_pose(lm, frame_w, frame_h)` uses `cv2.solvePnP` with a
+  standard 6-point 3D face model; returns `pitch_deg`, `yaw_deg` in degrees.
+  `FrameResult` now includes `pitch_deg` and `yaw_deg`.
+  Head-down detection uses `pitch_delta > threshold_deg` relative to a neutral
+  pitch baseline calibrated during the calibration window.
+  cv2 is lazily imported so `detection.py` remains headless-safe.
+
+---
+
 ## [Unreleased] — branch `polish/phase-2-correctness` (Stage B)
 
 ### Added — `0e67f75` `feat(monitor): implement DriverMonitor pipeline class`
