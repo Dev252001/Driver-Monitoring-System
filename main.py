@@ -61,9 +61,13 @@ def main() -> None:
             results = _face_mesh.process(rgb)
             t = time.monotonic()
 
+            frame_h, frame_w = frame.shape[:2]
+
             if results.multi_face_landmarks:
                 for face in results.multi_face_landmarks:
-                    result = monitor.process_landmarks(face.landmark, t)
+                    result = monitor.process_landmarks(
+                        face.landmark, t, frame_w=frame_w, frame_h=frame_h
+                    )
 
                     color = (
                         (0, 255, 0)
@@ -85,6 +89,12 @@ def main() -> None:
                     cv2.putText(
                         frame, f"BLINKS: {result.blink_count}", (30, 150),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 255), 2,
+                    )
+                    cv2.putText(
+                        frame,
+                        f"P:{result.pitch_deg:+.1f} Y:{result.yaw_deg:+.1f}",
+                        (30, 180),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 255, 180), 2,
                     )
 
             else:

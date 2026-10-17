@@ -2,7 +2,7 @@
 
 This module owns the entire per-frame detection pipeline.  Both the live loop
 (main.py) and the offline evaluator (scripts/evaluate.py) use it via
-``DriverMonitor.process_landmarks(lm, t) → FrameResult``.
+``DriverMonitor.process_landmarks(lm, t, frame_w, frame_h) → FrameResult``.
 
 No cv2 or mediapipe is imported at module level; the caller passes already-
 decoded landmark objects so that the pipeline is fully unit-testable with
@@ -15,9 +15,8 @@ Time convention
 - Offline: caller passes ``frame_index / fps``.
 The pipeline never calls ``time.time()`` or ``time.monotonic()`` internally.
 
-Bug notes (current code, fixed in later stages)
------------------------------------------------
-- C2 (gaze corner swap): gaze_ratio() uses wrong eye corners — fixed Stage C1.
+Bug notes
+---------
 - C7 (DROWSY fires once): StateManager blocks repeat alerts — fixed Stage C5.
 - C7i (EMA FPS-dependence): fixed alpha, not time-constant — fixed Stage C7.
 """
@@ -30,7 +29,7 @@ from typing import Any
 import numpy as np
 
 from config import CFG
-from detection import get_ear, get_gaze, get_head
+from detection import get_ear, get_gaze, get_head_pose
 from state import StateManager
 
 
@@ -45,7 +44,11 @@ class FrameResult:
     threshold:     Current EAR alert threshold (dimensionless).  0.0 until
                    calibration is complete.
     gaze:          Gaze direction: ``"LEFT"``, ``"RIGHT"``, or ``"CENTER"``.
-    head_down:     True if the head-down heuristic fired this frame.
+    head_down:     True if the head-down heuristic fired (pitch > threshold).
+    pitch_deg:     Head pitch in degrees from ``get_head_pose()``.
+                   > 0 = head tilted DOWN.  0.0 until calibration is complete.
+    yaw_deg:       Head yaw in degrees from ``get_head_pose()``.
+                   > 0 = head turned RIGHT (driver's right).
     state:         Driver state: ``"CALIBRATING"``, ``"ACTIVE"``,
                    ``"DROWSY"``, ``"LEFT"``, ``"RIGHT"``, or ``"DOWN"``.
     fatigue_score: Fatigue score in [0, 100] (points).
@@ -58,6 +61,8 @@ class FrameResult:
     threshold: float
     gaze: str
     head_down: bool
+    pitch_deg: float
+    yaw_deg: float
     state: str
     fatigue_score: float
     blink_count: int
@@ -90,9 +95,12 @@ class DriverMonitor:
         self._ear_samples: list[float] = []
         self._ear_threshold: float = 0.0
 
-        # Head-pose calibration
-        self._head_samples: list[float] = []
-        self._head_baseline: float | None = None
+        # Head-pose calibration (pitch neutral baseline from calib frames)
+        self._pitch_neutral: float = 0.0
+        self._pitch_samples: list[float] = []
+        # Current head-pose
+        self._pitch_deg: float = 0.0
+        self._yaw_deg: float = 0.0
 
         # Per-frame smoothed values
         self._ema_ear: float = 0.25
@@ -114,7 +122,7 @@ class DriverMonitor:
         self._turn_mode: bool = False
         self._turn_start: float = 0.0
 
-        # Head-down hysteresis
+        # Head-down state (pitch-based, replaces normalised-y heuristic)
         self._head_down: bool = False
 
         # Fatigue score in [0, 100]
@@ -133,12 +141,20 @@ class DriverMonitor:
         """True once enough frames have been collected for calibration."""
         return len(self._ear_samples) >= CFG.calib_frames
 
-    def process_landmarks(self, lm: list, t: float) -> FrameResult:
+    def process_landmarks(
+        self,
+        lm: list,
+        t: float,
+        frame_w: int = 640,
+        frame_h: int = 480,
+    ) -> FrameResult:
         """Run the full per-frame detection pipeline on pre-decoded landmarks.
 
         Args:
-            lm: MediaPipe landmark list (normalised coords, length ≥ 478).
-            t:  Monotonic timestamp in seconds from the caller.
+            lm:      MediaPipe landmark list (normalised coords, length ≥ 478).
+            t:       Monotonic timestamp in seconds from the caller.
+            frame_w: Frame width in pixels (passed to get_head_pose; default 640).
+            frame_h: Frame height in pixels (passed to get_head_pose; default 480).
 
         Returns:
             FrameResult with all per-frame outputs populated.
@@ -156,26 +172,33 @@ class DriverMonitor:
         # ── GAZE ────────────────────────────────────────────────────────
         gaze, self._ema_gaze = get_gaze(lm, self._ema_gaze)
 
-        # ── HEAD ────────────────────────────────────────────────────────
-        self._head_down, head_diff = get_head(
-            lm, self._head_baseline, self._head_down
-        )
+        # ── HEAD POSE (cv2.solvePnP) ─────────────────────────────────────
+        self._pitch_deg, self._yaw_deg = get_head_pose(lm, frame_w, frame_h)
 
         # ── CALIBRATION ─────────────────────────────────────────────────
         if not self.calibrated:
             self._ear_samples.append(ear)
-            self._head_samples.append(head_diff)
+            self._pitch_samples.append(self._pitch_deg)
 
             if self.calibrated:
                 # Compute thresholds on completion
                 self._ear_threshold = (
                     float(np.mean(self._ear_samples)) * CFG.ear_factor
                 )
-                self._head_baseline = float(np.mean(self._head_samples))
+                self._pitch_neutral = float(np.mean(self._pitch_samples))
 
             state = "CALIBRATING"
 
         else:
+            # Determine head-down from pitch relative to neutral baseline
+            pitch_delta = self._pitch_deg - self._pitch_neutral
+            enter = CFG.head_enter_delta * (180.0 / 0.08)   # convert normalised to degrees
+            exit_ = CFG.head_exit_delta  * (180.0 / 0.08)
+            if self._head_down:
+                self._head_down = pitch_delta > exit_
+            else:
+                self._head_down = pitch_delta > enter
+
             state = self._classify(t, ear, gaze)
             self._update_fatigue(state, t)
             self._state_manager.handle_state(state, t, calibrated=True)
@@ -186,6 +209,8 @@ class DriverMonitor:
             threshold=self._ear_threshold,
             gaze=gaze,
             head_down=self._head_down,
+            pitch_deg=self._pitch_deg,
+            yaw_deg=self._yaw_deg,
             state=state,
             fatigue_score=self._fatigue,
             blink_count=self._blink_count,

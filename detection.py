@@ -124,6 +124,91 @@ def get_gaze(lm: list, ema_ratio: float) -> tuple[str, float]:
     else:
         return "CENTER", ema_ratio
 
+# ---------------------------------------------------------------------------
+# Standard 6-point 3D face model for solvePnP (in mm, canonical pose).
+# Landmark indices correspond to MediaPipe topology (after cv2.flip).
+# After cv2.flip:  image-left = driver-right, image-right = driver-left.
+#
+# Convention: +pitch = head down, +yaw = head right (driver perspective).
+# ---------------------------------------------------------------------------
+_HEAD_POSE_MODEL_3D = [
+    (  0.0,    0.0,    0.0),   # 1:   nose tip
+    (  0.0,  -63.6,  -12.5),   # 152: chin
+    ( 43.3,   32.7,  -26.0),   # 33:  right-eye outer (driver-left, image-right)
+    (-43.3,   32.7,  -26.0),   # 263: left-eye outer  (driver-right, image-left)
+    ( 28.9,  -28.9,  -24.1),   # 61:  right mouth corner
+    (-28.9,  -28.9,  -24.1),   # 291: left  mouth corner
+]
+_HEAD_POSE_LM_IDX = [1, 152, 33, 263, 61, 291]
+
+
+def get_head_pose(lm: list, frame_w: int = 640, frame_h: int = 480) -> tuple[float, float]:
+    """Estimate head pitch and yaw via cv2.solvePnP.
+
+    Converts MediaPipe normalised landmark coordinates to pixel coordinates,
+    then solves the 2D-3D correspondence with an approximate pinhole camera
+    model (focal length = max(frame_w, frame_h), principal point = centre).
+
+    Args:
+        lm:      Full landmark list (MediaPipe normalised coords).
+        frame_w: Frame width in pixels (default 640).
+        frame_h: Frame height in pixels (default 480).
+
+    Returns:
+        Tuple (pitch_deg, yaw_deg) in degrees.
+        pitch_deg > 0 → head tilted DOWN.
+        yaw_deg   > 0 → head turned RIGHT (driver's right, after cv2.flip).
+
+    Notes:
+        cv2 is imported lazily so that importing detection.py never touches
+        the OpenCV runtime (important for headless CI).
+        The approximate camera matrix introduces a small systematic offset
+        (typically < 5°); it is sufficient for alert thresholding.
+        Phase 3 evaluation should characterise per-camera calibration error.
+    """
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    # 2D image points: normalised → pixel coordinates
+    pts_2d = np.array(
+        [[lm[i].x * frame_w, lm[i].y * frame_h] for i in _HEAD_POSE_LM_IDX],
+        dtype="float64",
+    )
+    pts_3d = np.array(_HEAD_POSE_MODEL_3D, dtype="float64")
+
+    # Approximate pinhole camera matrix
+    focal = float(max(frame_w, frame_h))
+    cam_matrix = np.array(
+        [[focal, 0, frame_w / 2],
+         [0, focal, frame_h / 2],
+         [0, 0, 1]],
+        dtype="float64",
+    )
+
+    ok, rvec, _ = cv2.solvePnP(
+        pts_3d, pts_2d, cam_matrix, None,
+        flags=cv2.SOLVEPNP_ITERATIVE,
+    )
+    if not ok:
+        return 0.0, 0.0
+
+    # Rodrigues → rotation matrix → Euler angles
+    rot_mat, _ = cv2.Rodrigues(rvec)
+
+    sy = float(np.sqrt(rot_mat[0, 0] ** 2 + rot_mat[1, 0] ** 2))
+    if sy > 1e-6:
+        pitch_rad = float(np.arctan2(rot_mat[2, 1], rot_mat[2, 2]))
+        yaw_rad   = float(np.arctan2(-rot_mat[2, 0], sy))
+    else:
+        # Gimbal lock
+        pitch_rad = float(np.arctan2(-rot_mat[1, 2], rot_mat[1, 1]))
+        yaw_rad   = float(np.arctan2(-rot_mat[2, 0], sy))
+
+    pitch_deg = float(np.degrees(pitch_rad))
+    yaw_deg   = float(np.degrees(yaw_rad))
+    return pitch_deg, yaw_deg
+
+
 def get_head(lm, baseline, prev_down=False):
     nose = lm[1].y
     eye = (lm[33].y + lm[263].y) / 2
