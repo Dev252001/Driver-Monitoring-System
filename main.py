@@ -92,7 +92,7 @@ def main() -> None:
                     )
                     cv2.putText(
                         frame,
-                        f"P:{result.pitch_deg:+.1f} Y:{result.yaw_deg:+.1f}",
+                        f"Pd:{result.pitch_delta:+.1f} Y:{result.yaw_deg:+.1f}",
                         (30, 180),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 255, 180), 2,
                     )

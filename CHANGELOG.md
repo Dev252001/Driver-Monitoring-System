@@ -5,6 +5,82 @@ order. Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — branch `polish/phase-3-evaluation` (Stage 0)
+
+### Fixed — C22: DOWN state unreachable (wrong unit conversion in monitor.py)
+
+**Before (`69c8682` monitor.py lines 216–217):**
+```python
+enter = CFG.head_enter_delta * (180.0 / 0.08)   # = 0.08 × 2250 = 180 °
+exit_ = CFG.head_exit_delta  * (180.0 / 0.08)   # = 0.05 × 2250 = 112.5 °
+```
+The normalised-coord threshold (0.08) was multiplied by the wrong factor,
+producing enter=180° and exit=112.5°.  A 180° pitch is physically impossible,
+so DOWN was unreachable since commit `69c8682`.  The Phase 2 summary that
+listed C5 as fixed was wrong — the solvePnP pitch values were computed
+correctly, but the comparison threshold was broken.
+
+**After:** `Config` gains two degree-valued fields (PROVISIONAL, tuned in
+Stage 3 sweep):
+- `head_enter_deg = 15.0` (degrees above calibrated neutral → enter DOWN)
+- `head_exit_deg  = 10.0` (degrees below enter threshold → leave DOWN)
+
+`monitor.py` now compares `pitch_delta > CFG.head_enter_deg` directly.
+No change to the hysteresis comparisons.
+
+**Removed:** `Config.head_enter_delta`, `Config.head_exit_delta` (normalised
+units, no longer used); `detection.get_head()` (old normalised-y heuristic,
+unused since `69c8682`); its characterization tests in `test_detection.py`.
+
+**Added:** `FrameResult.pitch_delta` field (pitch relative to calibrated
+neutral, degrees); shown in main.py overlay as `Pd:±xx.x`.
+
+**Tests:** `TestC22HeadDownReachability`, `TestC22PitchHysteresis`,
+`TestC22ConfigSanity` in `tests/test_monitor.py` — 13 new tests.
+
+**grep output for head_enter_delta / head_exit_delta / get_head before deletion:**
+```
+Drowsiness Detection\config.py:80: head_enter_delta = 0.08
+Drowsiness Detection\config.py:85: head_exit_delta  = 0.05
+Drowsiness Detection\monitor.py:216: enter = CFG.head_enter_delta * (180.0 / 0.08)
+Drowsiness Detection\monitor.py:217: exit_ = CFG.head_exit_delta  * (180.0 / 0.08)
+Drowsiness Detection\detection.py:221: def get_head(lm, baseline, prev_down=False):
+Drowsiness Detection\tests\test_detection.py:398–477: TestGetHead class
+```
+All deleted; no production caller remains.
+
+**Other old-unit numbers remaining in production code (reported, not fixed):**
+- `config.py:54` `gaze_left_threshold = 0.60` (dimensionless ratio, valid)
+- `config.py:60` `gaze_right_threshold = 0.40` (dimensionless ratio, valid)
+- `config.py:31` comment: `ln(1-0.4)` in tau derivation (correct comment)
+
+---
+
+### Fixed — C1: EAR pixel-space (aspect-ratio independence)
+
+**Before:** `detection.get_ear(lm, eye)` computed Euclidean distances in
+normalised coordinate space.  On a non-square sensor the horizontal and
+vertical scales differ: same 58×10 px eye gives EAR ≈ 0.229 at 640×480
+(4:3) vs ≈ 0.307 at 1280×720 (16:9) — a 34% difference.
+
+**After:** `get_ear(lm, eye, frame_w=1, frame_h=1)` scales each landmark by
+`frame_w` and `frame_h` before computing distances.  The same physical eye at
+640×480 and 1280×720 now gives the same EAR (within 1%).  The default
+`frame_w=frame_h=1` preserves backward-compat for callers that still pass
+normalised coords.
+
+**Threshold change:** None required.  `ear_factor = 0.80` is a multiplier on
+the driver's calibrated mean EAR, so the threshold tracks whatever absolute
+value `get_ear` produces.  No defaults need to change.
+
+**`monitor.py`:** `get_ear(lm, eye)` → `get_ear(lm, eye, frame_w, frame_h)`;
+`frame_w`/`frame_h` are already available from `process_landmarks`.
+
+**Test:** `test_same_physical_eye_same_ear_across_resolutions` in
+`TestGetEar` — was `xfail(strict=True)`, now a normal passing test.
+
+---
+
 ## [Unreleased] — branch `polish/phase-2-correctness` (Stages C–D)
 
 ### Fixed — `ffe8708` `chore(sounds): convert alert sounds mp3->wav (D3)`

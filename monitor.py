@@ -48,6 +48,9 @@ class FrameResult:
     head_down:     True if the head-down heuristic fired (pitch > threshold).
     pitch_deg:     Head pitch in degrees from ``get_head_pose()``.
                    > 0 = head tilted DOWN.  0.0 until calibration is complete.
+    pitch_delta:   Pitch relative to calibrated neutral baseline (degrees).
+                   Positive = head tilted further down than neutral.
+                   0.0 during calibration.
     yaw_deg:       Head yaw in degrees from ``get_head_pose()``.
                    > 0 = head turned RIGHT (driver's right).
     state:         Driver state: ``"CALIBRATING"``, ``"ACTIVE"``,
@@ -63,6 +66,7 @@ class FrameResult:
     gaze: str
     head_down: bool
     pitch_deg: float
+    pitch_delta: float
     yaw_deg: float
     state: str
     fatigue_score: float
@@ -179,7 +183,8 @@ class DriverMonitor:
 
         # ── EAR ─────────────────────────────────────────────────────────
         ear = (
-            get_ear(lm, self._RIGHT_EYE) + get_ear(lm, self._LEFT_EYE)
+            get_ear(lm, self._RIGHT_EYE, frame_w, frame_h)
+            + get_ear(lm, self._LEFT_EYE, frame_w, frame_h)
         ) / 2
         self._ema_ear = alpha_ear * ear + (1.0 - alpha_ear) * self._ema_ear
 
@@ -209,16 +214,15 @@ class DriverMonitor:
                 self._pitch_neutral = float(np.mean(self._pitch_samples))
 
             state = "CALIBRATING"
+            pitch_delta = 0.0
 
         else:
-            # Determine head-down from pitch relative to neutral baseline
+            # Determine head-down from pitch relative to neutral baseline (degrees)
             pitch_delta = self._pitch_deg - self._pitch_neutral
-            enter = CFG.head_enter_delta * (180.0 / 0.08)   # convert normalised to degrees
-            exit_ = CFG.head_exit_delta  * (180.0 / 0.08)
             if self._head_down:
-                self._head_down = pitch_delta > exit_
+                self._head_down = pitch_delta > CFG.head_exit_deg
             else:
-                self._head_down = pitch_delta > enter
+                self._head_down = pitch_delta > CFG.head_enter_deg
 
             state = self._classify(t, ear, gaze)
             self._update_fatigue(state, t)
@@ -231,6 +235,7 @@ class DriverMonitor:
             gaze=gaze,
             head_down=self._head_down,
             pitch_deg=self._pitch_deg,
+            pitch_delta=pitch_delta,
             yaw_deg=self._yaw_deg,
             state=state,
             fatigue_score=self._fatigue,

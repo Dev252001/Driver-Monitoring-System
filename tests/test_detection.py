@@ -1,4 +1,4 @@
-"""Characterization tests for detection.py — get_ear, gaze_ratio, get_gaze, get_head.
+"""Characterization tests for detection.py — get_ear, gaze_ratio, get_gaze, get_head_pose.
 
 These tests capture the CURRENT (pre-fix) behaviour so that Stage C fixes
 show up as explicit test diffs rather than silent regressions.
@@ -154,6 +154,35 @@ class TestGetEar:
         assert np.isclose(ear_480p, ear_960p, rtol=0.01), (
             f"EAR differs between same aspect-ratio resolutions: "
             f"{ear_480p:.4f} (640×480) vs {ear_960p:.4f} (1280×960)."
+        )
+
+    def test_same_physical_eye_same_ear_across_resolutions(self) -> None:
+        """C1 fix: get_ear(lm, eye, frame_w, frame_h) gives the same EAR for the
+        same *physical* eye geometry at 640×480 and 1280×720.
+
+        Fix applied: landmark coords are scaled by frame_w, frame_h before
+        computing distances, so the result is invariant to aspect ratio.
+        """
+        from detection import get_ear  # noqa: PLC0415
+
+        eye_idx = [33, 160, 158, 133, 153, 144]
+
+        def ear_at_res(w: int, h: int) -> float:
+            lm = make_lm()
+            set_lm(lm, 33,  58 / w, 235 / h)
+            set_lm(lm, 133, 116 / w, 235 / h)
+            set_lm(lm, 160, 68 / w,  230 / h)
+            set_lm(lm, 144, 68 / w,  240 / h)
+            set_lm(lm, 158, 106 / w, 230 / h)
+            set_lm(lm, 153, 106 / w, 240 / h)
+            return get_ear(lm, eye_idx, frame_w=w, frame_h=h)
+
+        ear_480p = ear_at_res(640, 480)
+        ear_720p = ear_at_res(1280, 720)
+        assert np.isclose(ear_480p, ear_720p, rtol=0.01), (
+            f"EAR differs between 640×480 ({ear_480p:.4f}) and "
+            f"1280×720 ({ear_720p:.4f}) for the same physical eye. "
+            "C1 not fixed yet."
         )
 
 
@@ -375,76 +404,6 @@ class TestGetGaze:
         assert abs(ema - 0.500) < 0.001, (
             f"Expected EMA=0.500 for centred asymmetric eyes after C2 fix, got {ema:.4f}."
         )
-
-
-# ---------------------------------------------------------------------------
-# get_head characterization
-# ---------------------------------------------------------------------------
-
-class TestGetHead:
-    def _make_head_lm(
-        self,
-        nose_y: float,
-        eye_r_y: float = 0.40,
-        eye_l_y: float = 0.40,
-    ) -> list[Any]:
-        lm = make_lm()
-        set_lm(lm, 1,   0.5, nose_y)
-        set_lm(lm, 33,  0.3, eye_r_y)
-        set_lm(lm, 263, 0.7, eye_l_y)
-        return lm
-
-    def test_none_baseline_returns_false(self) -> None:
-        from detection import get_head  # noqa: PLC0415
-
-        lm = self._make_head_lm(nose_y=0.55)
-        down, diff = get_head(lm, baseline=None)
-        assert not down
-        assert abs(diff - (0.55 - 0.40)) < 1e-6
-
-    def test_above_enter_threshold_triggers_down(self) -> None:
-        """nose.y - mean(eye.y) > baseline + 0.08 → HEAD DOWN."""
-        from detection import get_head  # noqa: PLC0415
-
-        baseline = 0.15   # neutral diff
-        # Raise nose to make diff = baseline + 0.09 → should trigger
-        nose_y = 0.40 + baseline + 0.09
-        lm2 = self._make_head_lm(nose_y=nose_y)
-        down, diff = get_head(lm2, baseline=baseline)
-        assert down, f"Expected head-down, diff={diff:.4f}, threshold={baseline + 0.08:.4f}"
-
-    def test_below_enter_threshold_no_trigger(self) -> None:
-        from detection import get_head  # noqa: PLC0415
-
-        baseline = 0.15
-        nose_y = 0.40 + baseline + 0.07   # diff = baseline + 0.07 < baseline + 0.08
-        lm = self._make_head_lm(nose_y=nose_y)
-        down, _ = get_head(lm, baseline=baseline)
-        assert not down
-
-    def test_hysteresis_exit(self) -> None:
-        """Once head-down, stays down until diff drops below baseline + 0.05."""
-        from detection import get_head  # noqa: PLC0415
-
-        baseline = 0.15
-        # diff = baseline + 0.06 → above exit (0.05), below enter (0.08)
-        nose_y = 0.40 + baseline + 0.06
-        lm = self._make_head_lm(nose_y=nose_y)
-        # prev_down=True: should remain down (above exit threshold)
-        down, _ = get_head(lm, baseline=baseline, prev_down=True)
-        assert down, "Expected hysteresis to keep head-down state"
-        # prev_down=False: should NOT enter (below enter threshold)
-        down2, _ = get_head(lm, baseline=baseline, prev_down=False)
-        assert not down2, "Expected hysteresis to prevent entering head-down state"
-
-    def test_diff_computed_correctly(self) -> None:
-        """diff = nose.y - mean(lm[33].y, lm[263].y)."""
-        from detection import get_head  # noqa: PLC0415
-
-        lm = self._make_head_lm(nose_y=0.60, eye_r_y=0.35, eye_l_y=0.45)
-        _, diff = get_head(lm, baseline=None)
-        expected = 0.60 - (0.35 + 0.45) / 2
-        assert abs(diff - expected) < 1e-6, f"Expected {expected:.4f}, got {diff:.4f}"
 
 
 # ---------------------------------------------------------------------------
