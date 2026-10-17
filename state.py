@@ -18,9 +18,10 @@ All ``now`` parameters are monotonic seconds from the caller.  In live mode
 the caller passes ``time.monotonic()``.  In offline evaluation the caller
 passes ``frame_index / fps``.
 
-Bug C7 (alert fires only once for sustained state) is characterised here
-and will be fixed in Stage C5.
-Bug C21 (first alert suppressed when clock starts at 0) is fixed here:
+Bug C7 (alert fires only once for sustained state) is fixed in Stage C5:
+the transition guard (``prev_state == stable_state``) has been removed;
+alerts now repeat every ``cooldown_drowsy_s`` seconds while sustained.
+Bug C21 (first alert suppressed when clock starts at 0) is fixed:
 ``last_alerts`` initialises to ``None`` so the first alert always fires.
 """
 
@@ -52,7 +53,9 @@ class StateManager:
         self.state_count: int = 0
         self._stable_state_start: float = 0.0
 
-        # Transition tracking (C7: fixes after Stage C5)
+        # prev_state: used only to reset debounce when ACTIVE is re-entered
+        # after a sustained alert state.  The transition guard that used this
+        # to block repeat alerts has been removed (C7 fix, Stage C5).
         self.prev_state: str = "ACTIVE"
 
         # Per-state last-alert monotonic timestamps.
@@ -99,17 +102,15 @@ class StateManager:
         if now - self._stable_state_start < CFG.stability_duration_s:
             return
 
-        # ── Transition guard (C7: still fires only on transition; fixed in C5) ──
-        if self.stable_state == self.prev_state:
-            return
-
         # ── DROWSY (highest priority, shorter cooldown) ───────────────────
+        # The transition guard has been removed (C7 fix): alerts fire whenever
+        # the cooldown has elapsed, so a sustained DROWSY repeats every
+        # cooldown_drowsy_s seconds rather than firing only once.
         if self.stable_state == "DROWSY":
             if self._cooldown_ok("DROWSY", now, CFG.cooldown_drowsy_s):
                 self._speak("DROWSY")
                 self._log("DROWSY")
                 self.last_alerts["DROWSY"] = now
-            self.prev_state = "DROWSY"
             return
 
         # ── LEFT / RIGHT / DOWN ───────────────────────────────────────────
@@ -117,8 +118,6 @@ class StateManager:
             self._speak(self.stable_state)
             self._log(self.stable_state)
             self.last_alerts[self.stable_state] = now
-
-        self.prev_state = self.stable_state
 
 
 # ---------------------------------------------------------------------------
