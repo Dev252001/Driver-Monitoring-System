@@ -3,6 +3,49 @@
 All notable behaviour-changing commits are listed here in reverse chronological
 order. Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+---
+
+## [Unreleased] — branch `polish/phase-2-correctness` (Stage B)
+
+### Added — `0e67f75` `feat(monitor): implement DriverMonitor pipeline class`
+
+**monitor.py: new `DriverMonitor.process_landmarks(lm, t) → FrameResult`**
+
+- **Before:** all detection + state logic was scattered across 200 lines of
+  module-level code in `main.py` with no encapsulation; untestable.
+- **After:** `DriverMonitor` owns the full per-frame pipeline; both `main.py`
+  and `scripts/evaluate.py` (Phase 3) use the same code path.  `FrameResult`
+  dataclass carries all per-frame outputs.
+- **Fatigue (C12):** per-second rates (`CFG.fatigue_decay_drowsy_per_s` etc.)
+  multiplied by `dt`, so behaviour is identical at 30 FPS and frame-accurate
+  at any other rate.  (main.py still had per-frame deltas before this commit.)
+- **Injectable backends:** `audio_backend.play()` and `event_logger.log_event()`
+  are injected; `NullAudio()` + temp-path `EventLogger` used in all tests.
+- **Time injection:** `t` parameter used throughout; no internal `time.time()`
+  or `time.monotonic()` calls.
+
+### Fixed — `32188f1` `refactor(main): rewrite to use DriverMonitor.process_landmarks()`
+
+**Bug C14 — no `try/finally` for camera release**
+
+- **Before (`main.py:213`):** `cap.release()` called unconditionally at the
+  bottom of the script.  An unhandled exception (e.g. from MediaPipe) would
+  skip it, leaving the webcam locked.
+- **After:** `cap.release()` and `cv2.destroyAllWindows()` are both in a
+  `finally` block, guaranteed to run even on exception.
+
+**Bug C17 — `time.time()` in main.py**
+
+- **Before:** `now = time.time()`, `frame_start = time.time()`.
+- **After:** all timestamps in `main.py` use `time.monotonic()`.
+
+**Bug C12 — per-frame fatigue deltas in main.py**
+
+- **Before:** `fatigue_score -= 2` / `−1` / `+0.5` per frame — FPS-dependent.
+- **After:** logic moved to `DriverMonitor._update_fatigue()` which multiplies
+  per-second rates from CFG by `dt`.  The old per-frame code is removed from
+  `main.py`.
+
 Each entry cites the commit hash, the **before** behaviour, the **after**
 behaviour, and the reason for the change.
 
