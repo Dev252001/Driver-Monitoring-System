@@ -23,13 +23,14 @@ Bug notes
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from config import CFG
-from detection import get_ear, get_gaze, get_head_pose
+from detection import gaze_ratio, get_ear, get_head_pose
 from state import StateManager
 
 
@@ -129,6 +130,9 @@ class DriverMonitor:
         self._fatigue: float = 100.0
         self._last_active_t: float = 0.0
 
+        # Previous frame timestamp for dt computation (C7 EMA fix)
+        self._prev_t: float | None = None
+
         # Track whether an alert was fired for the most recent frame
         self._alert_fired: bool = False
 
@@ -161,16 +165,33 @@ class DriverMonitor:
         """
         self._alert_fired = False
 
+        # ── dt for FPS-independent EMA (C7) ─────────────────────────────
+        # Clamp: first frame uses 1/30 s nominal; stalls capped at 0.5 s.
+        if self._prev_t is None:
+            dt = 1.0 / 30.0
+        else:
+            dt = min(t - self._prev_t, 0.5)
+            dt = max(dt, 1e-6)   # guard against t not advancing (frozen clock tests)
+        self._prev_t = t
+
+        alpha_ear  = 1.0 - math.exp(-dt / CFG.tau_ear_s)
+        alpha_gaze = 1.0 - math.exp(-dt / CFG.tau_gaze_s)
+
         # ── EAR ─────────────────────────────────────────────────────────
         ear = (
             get_ear(lm, self._RIGHT_EYE) + get_ear(lm, self._LEFT_EYE)
         ) / 2
-        self._ema_ear = (
-            CFG.ear_ema_alpha * ear + (1 - CFG.ear_ema_alpha) * self._ema_ear
-        )
+        self._ema_ear = alpha_ear * ear + (1.0 - alpha_ear) * self._ema_ear
 
-        # ── GAZE ────────────────────────────────────────────────────────
-        gaze, self._ema_gaze = get_gaze(lm, self._ema_gaze)
+        # ── GAZE (EMA done here with time-based alpha) ───────────────────
+        raw_gaze_ratio = gaze_ratio(lm)
+        self._ema_gaze = alpha_gaze * raw_gaze_ratio + (1.0 - alpha_gaze) * self._ema_gaze
+        if self._ema_gaze > CFG.gaze_left_threshold:
+            gaze = "LEFT"
+        elif self._ema_gaze < CFG.gaze_right_threshold:
+            gaze = "RIGHT"
+        else:
+            gaze = "CENTER"
 
         # ── HEAD POSE (cv2.solvePnP) ─────────────────────────────────────
         self._pitch_deg, self._yaw_deg = get_head_pose(lm, frame_w, frame_h)

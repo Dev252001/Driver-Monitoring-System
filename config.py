@@ -24,9 +24,12 @@ class Config:
     neutral head pose.  Driver should look straight ahead during this phase."""
 
     # ── EAR (Eye Aspect Ratio) ───────────────────────────────────────────────
-    ear_ema_alpha: float = 0.4
-    """Weight of the current EAR sample in the exponential moving average.
-    Range (0, 1).  Higher = more reactive, lower = smoother."""
+    tau_ear_s: float = 0.0653
+    """EAR EMA time constant in seconds (C7 fix: FPS-independent smoothing).
+    Per-frame alpha is computed as: alpha = 1 - exp(-dt / tau_ear_s).
+    Calibrated to match old fixed alpha=0.4 at 30 FPS:
+      tau = -(1/30) / ln(1-0.4) = 0.0653 s  →  alpha(30fps)=0.400 ✓
+    Unit: seconds."""
 
     ear_factor: float = 0.80
     """EAR threshold multiplier applied to the calibrated mean.
@@ -41,9 +44,12 @@ class Config:
     (driver's eyes must stay closed for this duration).  Unit: seconds."""
 
     # ── Gaze ─────────────────────────────────────────────────────────────────
-    gaze_ema_alpha: float = 0.3
-    """Weight of the current raw gaze ratio in its exponential moving average.
-    Separate from EAR smoothing."""
+    tau_gaze_s: float = 0.0935
+    """Gaze EMA time constant in seconds (C7 fix: FPS-independent smoothing).
+    Per-frame alpha is computed as: alpha = 1 - exp(-dt / tau_gaze_s).
+    Calibrated to match old fixed alpha=0.3 at 30 FPS:
+      tau = -(1/30) / ln(1-0.3) = 0.0935 s  →  alpha(30fps)=0.300 ✓
+    Unit: seconds."""
 
     gaze_left_threshold: float = 0.60
     """Smoothed gaze ratio above this value → LEFT distraction.

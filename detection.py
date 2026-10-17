@@ -101,21 +101,30 @@ def gaze_ratio(lm: list) -> float:
     return float((ratio_r + ratio_l) / 2)
 
 
-def get_gaze(lm: list, ema_ratio: float) -> tuple[str, float]:
+def get_gaze(lm: list, ema_ratio: float, dt: float = 1.0 / 30) -> tuple[str, float]:
     """Apply EMA smoothing to the raw gaze ratio and classify gaze direction.
+
+    This function is kept for backward compatibility; new callers should
+    call ``gaze_ratio()`` directly and manage the EMA with a time-based
+    alpha (see ``DriverMonitor.process_landmarks``).
 
     Args:
         lm:        Full landmark list (MediaPipe normalised coords).
         ema_ratio: Previous EMA value (initialise to 0.5 for centred gaze).
+        dt:        Frame duration in seconds for time-based EMA alpha.
+                   Default 1/30 s (30 FPS).
 
     Returns:
         Tuple of (direction, new_ema_ratio) where direction is one of
         ``"LEFT"``, ``"RIGHT"``, ``"CENTER"``.
     """
+    import math  # noqa: PLC0415
+
     from config import CFG  # noqa: PLC0415 (avoid import-time side effects)
 
     ratio = gaze_ratio(lm)
-    ema_ratio = CFG.gaze_ema_alpha * ratio + (1 - CFG.gaze_ema_alpha) * ema_ratio
+    alpha = 1.0 - math.exp(-dt / CFG.tau_gaze_s)
+    ema_ratio = alpha * ratio + (1.0 - alpha) * ema_ratio
 
     if ema_ratio > CFG.gaze_left_threshold:
         return "LEFT", ema_ratio

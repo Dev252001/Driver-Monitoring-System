@@ -354,9 +354,13 @@ class TestGetGaze:
         for i in [474, 475, 476, 477]:
             set_lm(lm, i, 0.595, 0.500)
 
+        import math  # noqa: PLC0415
+
         raw = gaze_ratio(lm)
         prior_ema = 0.5
-        expected_ema = CFG.gaze_ema_alpha * raw + (1 - CFG.gaze_ema_alpha) * prior_ema
+        dt = 1.0 / 30  # default dt for get_gaze()
+        alpha = 1.0 - math.exp(-dt / CFG.tau_gaze_s)
+        expected_ema = alpha * raw + (1 - alpha) * prior_ema
 
         _gaze, ema = get_gaze(lm, prior_ema)
 
