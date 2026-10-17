@@ -1,0 +1,18 @@
+# Python 3.10.11
+# Pinned to the lowest compatible version available on PyPI as of 2026-09-01.
+# Tested working on Python 3.10.11 / Windows x64.
+#
+# mediapipe declares opencv-contrib-python as its dependency.
+# Do NOT add opencv-python alongside opencv-contrib-python — they ship the
+# same cv2 bindings and having both can cause symbol conflicts on some platforms.
+#
+# mediapipe==0.10.9 was yanked from PyPI; 0.10.30 is the lowest available.
+# pygame==2.6.1 has no binary wheel for Python 3.10 on Windows; 2.5.2 does.
+#
+# Install:  pip install -r requirements.txt
+# Verify:   python -c "import cv2, mediapipe, numpy, pygame; print('OK')"
+
+mediapipe==0.10.30
+opencv-contrib-python==4.13.0.92
+numpy>=1.24,<3
+pygame==2.5.2

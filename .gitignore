@@ -1,8 +1,26 @@
-__pycache__/
+﻿__pycache__/
 *.pyc
 *.pyo
 venv/
 .env
+
+# Generated logs and evaluation artefacts
 fatigue_log.csv
+logs/
+*.log
+*.jsonl
+
+# Evaluation results (raw data never committed; summary JSON in results/ is committed)
+results/raw/
+data/
+*.mp4
+*.avi
+*.gif
+
+# OS
 .DS_Store
 Thumbs.db
+
+# Editor
+.vscode/
+.idea/
