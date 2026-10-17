@@ -49,7 +49,7 @@ all thresholds; introduce the `DriverMonitor` pipeline class.
 | C18 | ✅ Done `0475513` | Logger: absolute path, header row, 7 columns incl. EAR/FPS | `logger.py:5→32` |
 | C21 | ✅ Done `ca64640` | First alert suppressed when clock starts at 0 (offline mode); `last_alerts` now `None`-initialised | `state.py:61` |
 | C4 | ✅ Done `bd85b0e` | All thresholds centralised in frozen `Config` dataclass with units | `config.py` |
-| C1 | Stage C2 | EAR on normalised coords: document the calibration mitigation | `detection.py:4-12` |
+| C1 | ✅ Done `97d596e`+C2 | EAR aspect-ratio dependence documented in `get_ear` docstring with calibration mitigation | `detection.py:get_ear` |
 | C5 | Stage C3/C4 | Head-down uses normalised y-delta: replaced by `cv2.solvePnP` head pose | `detection.py:38-53` |
 | C13 | Stage B/C | Drowsy detection is 1.5 s EAR hold, not PERCLOS: add PERCLOS metric | `main.py:96-102` |
 | C14 | Stage B | No `try/finally` for camera release | `main.py:211-212` |

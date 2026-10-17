@@ -23,16 +23,33 @@ import numpy as np
 
 
 def get_ear(lm: list, eye: list[int]) -> float:
-    """Compute Eye Aspect Ratio for one eye.
+    """Compute Eye Aspect Ratio for one eye (Soukupová & Čech 2016).
+
+    Formula:
+        EAR = (||p2-p6|| + ||p3-p5||) / (2 * ||p1-p4||)
 
     Args:
-        lm:  Full landmark list (MediaPipe normalised coords).
+        lm:  Full landmark list (MediaPipe normalised coords: x,y ∈ [0,1]).
         eye: Six landmark indices [p1, p2, p3, p4, p5, p6] where
              p1/p4 are horizontal corners and p2/p3/p5/p6 are
              vertical lid landmarks.
 
     Returns:
-        EAR value (dimensionless).  0 for fully closed, ~0.3 for open.
+        EAR value (dimensionless).  0 for fully closed, ~0.2–0.4 for open.
+
+    Notes (finding C1 — aspect-ratio dependence):
+        The Euclidean distances are computed in normalised coordinate space
+        (x ∈ [0,1] relative to image width, y ∈ [0,1] relative to image
+        height).  On a non-square sensor (e.g. 640×480 vs 1280×720) the
+        horizontal and vertical scales differ, so the same physical eye
+        geometry produces different EAR values at different aspect ratios.
+
+        **Mitigation:** per-driver calibration records the driver's own
+        open-eye EAR distribution (``Config.calib_frames`` frames) and sets
+        the threshold as ``mean(EAR_calib) * Config.ear_factor``.  The
+        threshold adapts to each camera/aspect-ratio automatically; only
+        the relative drop matters.  A fixed cross-camera threshold of ~0.25
+        would not be reliable (see ``Config.ear_factor``).
     """
     p2 = np.array([lm[eye[1]].x, lm[eye[1]].y])
     p6 = np.array([lm[eye[5]].x, lm[eye[5]].y])
