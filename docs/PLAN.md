@@ -38,21 +38,22 @@ all thresholds; introduce the `DriverMonitor` pipeline class.
 
 ### Confirmed bugs to fix (test-first: failing test → fix in separate commit)
 
-| ID | Bug | File:line |
-|----|-----|-----------|
-| C2 | Iris corners swapped: left iris uses right eye corners and vice versa | `detection.py:26-27` |
-| C7 | DROWSY alert fires once then silenced indefinitely (safety issue) | `state.py:41-50` |
-| C8 | Frame-count debounce is FPS-dependent | `state.py:16` |
-| C12 | Fatigue score deltas are per-frame, not per-second | `main.py:152-156` |
-| C15 | `audio.py` fails on headless import (side effects at module level) | `audio.py:5-14` |
-| C17 | `time.time()` instead of `time.monotonic()` for duration measurement | `audio.py`, `state.py` |
-| C18 | Logger: CWD-relative path, no header, no features logged | `logger.py:5` |
-| C4 | Ten thresholds scattered outside `config.py` | multiple |
-| C1 | EAR on normalised coords: document the calibration mitigation | `detection.py:4-12` |
-| C5 | Head-down uses normalised y-delta: document scale dependence | `detection.py:38-53` |
-| C13 | Drowsy detection is 1.5 s EAR hold, not PERCLOS: add PERCLOS metric | `main.py:96-102` |
-| C14 | No `try/finally` for camera release | `main.py:211-212` |
-| C16 | MP3 not guaranteed cross-platform (Phase 2 prep; conversion is last commit of Phase 2) | `audio.py` |
+| ID | Status | Bug | File:line |
+|----|--------|-----|-----------|
+| C2 | Stage C1 | Iris corners swapped: left iris uses right eye corners and vice versa | `detection.py:26-27` |
+| C7 | Stage C5 | DROWSY alert fires once then silenced indefinitely (safety issue) | `state.py:41-50` |
+| C8 | ✅ Done `ca64640` | Frame-count debounce replaced by time-based gate (`stability_duration_s=0.167 s`); see CHANGELOG.md | `state.py:16→99` |
+| C12 | Stage C6 | Fatigue score deltas are per-frame, not per-second | `main.py:152-156` |
+| C15 | ✅ Done `0475513` | `audio.py` import-time side effects removed; lazy init via `PygameAudio._ensure_init()` | `audio.py:5-14→92` |
+| C17 | ✅ Done `0475513` | `time.time()` replaced by injectable clock (`time.monotonic` default) | `audio.py`, `state.py` |
+| C18 | ✅ Done `0475513` | Logger: absolute path, header row, 7 columns incl. EAR/FPS | `logger.py:5→32` |
+| C21 | ✅ Done `ca64640` | First alert suppressed when clock starts at 0 (offline mode); `last_alerts` now `None`-initialised | `state.py:61` |
+| C4 | ✅ Done `bd85b0e` | All thresholds centralised in frozen `Config` dataclass with units | `config.py` |
+| C1 | Stage C2 | EAR on normalised coords: document the calibration mitigation | `detection.py:4-12` |
+| C5 | Stage C3/C4 | Head-down uses normalised y-delta: replaced by `cv2.solvePnP` head pose | `detection.py:38-53` |
+| C13 | Stage B/C | Drowsy detection is 1.5 s EAR hold, not PERCLOS: add PERCLOS metric | `main.py:96-102` |
+| C14 | Stage B | No `try/finally` for camera release | `main.py:211-212` |
+| C16 | Stage D3 | MP3 not guaranteed cross-platform; convert to .ogg (last commit of Phase 2) | `audio.py` |
 
 ### Architectural decisions (binding for all phases)
 
@@ -151,6 +152,33 @@ frame-accurate at any other rate.
   manually confirmed.
 - Add a one-line AI-assistance disclosure to the README footer:
   > "Development assisted by IBM Bob (AI coding assistant)."
+
+#### i. EMA smoothing: FPS-independent time constant (Stage C7)
+The existing EAR and gaze exponential moving averages use a fixed alpha
+(`ear_ema_alpha = 0.4`, `gaze_ema_alpha = 0.3`). A fixed alpha gives different
+effective time constants at different frame rates: at 30 FPS, alpha=0.4 gives
+τ ≈ 0.077 s per-sample, but at 15 FPS the same alpha doubles the effective τ.
+
+**Fix (Stage C7):** compute alpha per-frame from a fixed desired time constant:
+
+```
+alpha = 1 - exp(-dt / tau)
+```
+
+where `dt = 1/fps` (seconds since last frame, from the injected clock) and
+`tau` is a stored config parameter. Calibrated to match the original 30 FPS
+behaviour:
+
+```
+EAR  alpha=0.4 at 30 FPS  →  tau_ear  = -1/30 / ln(1-0.4) ≈ 0.0457 s
+Gaze alpha=0.3 at 30 FPS  →  tau_gaze = -1/30 / ln(1-0.3) ≈ 0.0827 s
+```
+
+Store `tau_ear_s` and `tau_gaze_s` in `Config`; remove `ear_ema_alpha` and
+`gaze_ema_alpha`.
+
+**Acceptance test:** step-response test at 15, 30, 60 FPS must agree within 2%
+of the reference EMA value at t = 0.5 s.
 
 ### Audio format migration (last commit of Phase 2)
 Convert `.mp3` → `.ogg` (Vorbis). The `AudioPlayer` loader tries `.ogg`,
