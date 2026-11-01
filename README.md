@@ -6,11 +6,7 @@ A real-time, rule-based driver drowsiness and distraction detection system built
 
 ## Demo
 
-> **No screenshot is committed yet.** To add one: run `python main.py`, press **`s`** (or use a screen-capture tool) while the overlay is visible, save the file as `docs/demo.png`, and replace this block:
->
-> ```
-> ![Demo — driver monitoring overlay](docs/demo.png)
-> ```
+![Demo — driver monitoring overlay](docs/demo.png)
 
 ---
 

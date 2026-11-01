@@ -21,6 +21,7 @@ Notes
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import cv2
 
@@ -78,8 +79,14 @@ def main() -> None:
 
             cv2.imshow("SMART DRIVER SYSTEM", frame)
 
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
                 break
+            if key == ord("s"):
+                path = Path("docs/demo.png")
+                path.parent.mkdir(exist_ok=True)
+                cv2.imwrite(str(path), frame)
+                print(f"Screenshot saved → {path.resolve()}")
 
     finally:
         cap.release()
