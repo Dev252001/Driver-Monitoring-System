@@ -1,6 +1,16 @@
-# 🚗 AI-Based Smart Driver Monitoring System
+# 🚗 Rule-Based Driver Monitoring System
 
-A real-time driver drowsiness and distraction detection system built with Python, MediaPipe, and OpenCV. It monitors eye activity, gaze direction, and head pose via webcam and plays audio alerts when unsafe behaviour is detected.
+A real-time, rule-based driver drowsiness and distraction detection system built with Python, MediaPipe, and OpenCV. It monitors eye activity, gaze direction, and head pose via webcam and plays audio alerts when unsafe behaviour is detected.
+
+---
+
+## Demo
+
+> **No screenshot is committed yet.** To add one: run `python main.py`, press **`s`** (or use a screen-capture tool) while the overlay is visible, save the file as `docs/demo.png`, and replace this block:
+>
+> ```
+> ![Demo — driver monitoring overlay](docs/demo.png)
+> ```
 
 ---
 
