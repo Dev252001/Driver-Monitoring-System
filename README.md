@@ -149,6 +149,12 @@ All alerts are appended to `fatigue_log.csv`:
 
 ---
 
+## Development Notes
+
+This project was built with the assistance of an AI coding assistant (IBM Bob). All logic, thresholds, and architectural decisions were reviewed and validated by the author. Every module can be explained line-by-line.
+
+---
+
 ## License
 
 MIT

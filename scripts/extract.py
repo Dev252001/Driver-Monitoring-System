@@ -108,7 +108,7 @@ def extract(
         frame_w=np.int32(frame_w),
         frame_h=np.int32(frame_h),
     )
-    print(f"\nExtracted {frame_idx} frames → {out_path}")
+    print(f"\nExtracted {frame_idx} frames -> {out_path}")
     n_faces = int(np.sum(~np.isnan(lm_arr[:, 0, 0])))
     print(f"  Face detected in {n_faces}/{frame_idx} frames "
           f"({100*n_faces/max(frame_idx,1):.1f}%)")

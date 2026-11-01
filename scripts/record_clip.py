@@ -124,7 +124,7 @@ def record(subject: str, session: str, condition: str,
                 frame_idx += 1
     finally:
         cap.release(); vw.release(); cv2.destroyAllWindows()  # noqa: E702
-    print(f"Video→{_DATA_DIR/f'{stem}.mp4'}  Timestamps→{ts_path} ({frame_idx} frames)")
+    print(f"Video->{_DATA_DIR/f'{stem}.mp4'}  Timestamps->{ts_path} ({frame_idx} frames)")
 
 
 def main() -> None:

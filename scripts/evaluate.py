@@ -246,11 +246,11 @@ def run(
         json.dump(result_dict, fh, indent=2, allow_nan=True)
 
     print(f"Run {run_id}")
-    print(f"  Results → {result_json}")
-    print(f"  Errors  → {errors_path}")
+    print(f"  Results -> {result_json}")
+    print(f"  Errors  -> {errors_path}")
     for lbl, m in per_label.items():
-        r_lo = f"{m['recall_ci'][0]:.2f}" if m['recall_ci'] else "—"
-        r_hi = f"{m['recall_ci'][1]:.2f}" if m['recall_ci'] else "—"
+        r_lo = f"{m['recall_ci'][0]:.2f}" if m['recall_ci'] else "-"
+        r_hi = f"{m['recall_ci'][1]:.2f}" if m['recall_ci'] else "-"
         print(f"  {lbl:<8} recall={m['recall']:.2f} [{r_lo},{r_hi}]  "
               f"precision={m['precision']:.2f}  f1={m['f1']:.2f}  "
               f"tp={m['tp']} fn={m['fn']} fp={m['fp']}  "
