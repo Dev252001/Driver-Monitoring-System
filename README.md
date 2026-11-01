@@ -6,7 +6,17 @@ A real-time, rule-based driver drowsiness and distraction detection system built
 
 ## Demo
 
-![Demo — driver monitoring overlay](docs/demo.png)
+All five system states captured live:
+
+| ACTIVE | DROWSY |
+|:---:|:---:|
+| ![Active state](docs/state_active.png) | ![Drowsy state](docs/state_drowsy.png) |
+| EAR: 0.27 · FATIGUE: 100% | EAR: 0.05 · FATIGUE: 0% — eyes closed |
+
+| LEFT gaze | RIGHT gaze | Face not detected |
+|:---:|:---:|:---:|
+| ![Left gaze](docs/state_left.png) | ![Right gaze](docs/state_right.png) | ![Face not detected](docs/state_face_not_detected.png) |
+| Yaw: −29.8° | Yaw: +34.8° | Head fully down / out of frame |
 
 ---
 
