@@ -54,8 +54,10 @@ A real-time, rule-based driver drowsiness and distraction detection system built
 Install dependencies:
 
 ```bash
-pip install opencv-python mediapipe pygame numpy
+pip install -r requirements.txt
 ```
+
+> Pinned versions are in [`requirements.txt`](requirements.txt) (Python 3.10, Windows x64 verified). A lock file with full transitive pins is in [`requirements-lock.txt`](requirements-lock.txt).
 
 ---
 
