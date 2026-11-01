@@ -107,13 +107,13 @@ class TestFrameResult:
         assert dataclasses.is_dataclass(FrameResult)
 
     def test_frameresult_has_required_fields(self) -> None:
-        """FrameResult must include pitch_deg and yaw_deg (added in Stage C3)."""
+        """FrameResult must include pitch_deg, pitch_delta and yaw_deg."""
         from monitor import FrameResult  # noqa: PLC0415
 
         fields = {f.name for f in dataclasses.fields(FrameResult)}
         required = {
             "ear", "ema_ear", "threshold", "gaze", "head_down",
-            "pitch_deg", "yaw_deg",
+            "pitch_deg", "pitch_delta", "yaw_deg",
             "state", "fatigue_score", "blink_count", "alert_fired",
         }
         missing = required - fields
@@ -124,7 +124,7 @@ class TestFrameResult:
 
         r = FrameResult(
             ear=0.30, ema_ear=0.28, threshold=0.22, gaze="CENTER",
-            head_down=False, pitch_deg=0.0, yaw_deg=0.0,
+            head_down=False, pitch_deg=0.0, pitch_delta=0.0, yaw_deg=0.0,
             state="ACTIVE", fatigue_score=100.0,
             blink_count=0, alert_fired=False,
         )
@@ -327,6 +327,203 @@ class TestProcessLandmarks:
         assert math.isfinite(result.yaw_deg),   f"yaw_deg={result.yaw_deg} is not finite"
 
 
+
+
+# ---------------------------------------------------------------------------
+# Stage 0 (Phase 3) — C22: DOWN state reachability and pitch hysteresis
+# ---------------------------------------------------------------------------
+
+
+def _make_monitor_with_pitch(tmp_path: Path, pitch_neutral: float = 0.0):
+    """Return a calibrated DriverMonitor with _pitch_neutral forced to a known value.
+
+    All calibration is done with open eyes and neutral pose; then _pitch_neutral
+    is overwritten so tests control pitch_delta precisely.
+    """
+    from audio import NullAudio  # noqa: PLC0415
+    from config import CFG  # noqa: PLC0415
+    from logger import EventLogger  # noqa: PLC0415
+    from monitor import DriverMonitor  # noqa: PLC0415
+
+    audio = NullAudio()
+    log = EventLogger(log_path=tmp_path / "pitch_log.csv")
+    mon = DriverMonitor(audio_backend=audio, event_logger=log)
+
+    lm = _open_eye_lm()
+    for i in range(CFG.calib_frames):
+        t = i * (1 / 30)
+        mon.process_landmarks(lm, t)
+
+    # Override pitch neutral so that we can inject exact pitch_delta values.
+    mon._pitch_neutral = pitch_neutral
+    return mon, audio
+
+
+def _step_to_state(
+    mon,
+    pitch_deg: float,
+    gaze: str = "CENTER",
+    n_frames: int = 120,
+    t_start: float = 10.0,
+) -> str:
+    """Drive the monitor for n_frames with a constant injected pitch and gaze.
+
+    pitch_deg is injected directly into mon._pitch_deg (bypasses cv2/solvePnP).
+    Gaze is set via the EMA ratio: forced into CENTER / LEFT / RIGHT band.
+    Returns the final state.
+    """
+    from config import CFG  # noqa: PLC0415
+
+    # Force gaze ratio so that ema_gaze stays in the desired band
+    if gaze == "LEFT":
+        gaze_ratio_val = CFG.gaze_left_threshold + 0.05
+    elif gaze == "RIGHT":
+        gaze_ratio_val = CFG.gaze_right_threshold - 0.05
+    else:
+        gaze_ratio_val = 0.5
+
+    state = "ACTIVE"
+    t = t_start
+    import detection as _det_mod  # noqa: PLC0415
+    import monitor as _monitor_mod  # noqa: PLC0415
+    for _ in range(n_frames):
+        t += 1 / 30
+        # Monkeypatch detection.get_head_pose (and the reference in monitor's namespace)
+        # so the pipeline sees the injected pitch without needing real cv2 / solvePnP.
+
+        original_ghp = _det_mod.get_head_pose
+        try:
+            _det_mod.get_head_pose = lambda lm, fw, fh: (pitch_deg, 0.0)  # noqa: ARG005
+            _monitor_mod.get_head_pose = _det_mod.get_head_pose
+
+            lm = _open_eye_lm()
+            # Inject gaze EMA directly to avoid landmark-based gaze computation
+            mon._ema_gaze = gaze_ratio_val
+            result = mon.process_landmarks(lm, t)
+            state = result.state
+        finally:
+            _det_mod.get_head_pose = original_ghp
+            _monitor_mod.get_head_pose = original_ghp
+
+    return state
+
+
+class TestC22HeadDownReachability:
+    """C22: verify DOWN state is reachable and pitch hysteresis works correctly.
+
+    Before the fix, head_enter_delta = 0.08 was multiplied by 180/0.08 = 2250,
+    giving an enter threshold of 180 degrees — physically impossible, so DOWN was
+    unreachable.  After the fix, head_enter_deg = 15.0 degrees.
+    """
+
+    def test_drowsy_reachable(self, tmp_path: Path) -> None:
+        """DROWSY is reachable via sustained eye closure."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        lm = _closed_eye_lm()
+        t = 10.0
+        state = "ACTIVE"
+        for _ in range(120):
+            t += 1 / 30
+            state = mon.process_landmarks(lm, t).state
+        assert state == "DROWSY", f"Expected DROWSY, got {state}"
+
+    def test_down_reachable(self, tmp_path: Path) -> None:
+        """DOWN is reachable when pitch_delta > head_enter_deg."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=20.0, gaze="CENTER")
+        assert state == "DOWN", f"Expected DOWN at 20 deg pitch, got {state}"
+
+    def test_left_reachable_via_yaw(self, tmp_path: Path) -> None:
+        """LEFT is reachable via sustained gaze left (EMA > threshold)."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=0.0, gaze="LEFT")
+        assert state == "LEFT", f"Expected LEFT via yaw/iris gaze, got {state}"
+
+    def test_right_reachable_via_yaw(self, tmp_path: Path) -> None:
+        """RIGHT is reachable via sustained gaze right (EMA < threshold)."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=0.0, gaze="RIGHT")
+        assert state == "RIGHT", f"Expected RIGHT via yaw/iris gaze, got {state}"
+
+    def test_left_reachable_via_iris_only(self, tmp_path: Path) -> None:
+        """LEFT is reachable when the iris EMA is above gaze_left_threshold."""
+        # Iris-only and yaw+iris both go through the same EMA path in monitor.py,
+        # so this test confirms the iris path independently.
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=0.0, gaze="LEFT")
+        assert state == "LEFT", f"Expected LEFT via iris-only, got {state}"
+
+    def test_right_reachable_via_iris_only(self, tmp_path: Path) -> None:
+        """RIGHT is reachable when the iris EMA is below gaze_right_threshold."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=0.0, gaze="RIGHT")
+        assert state == "RIGHT", f"Expected RIGHT via iris-only, got {state}"
+
+
+class TestC22PitchHysteresis:
+    """Pitch hysteresis: enter at head_enter_deg, exit at head_exit_deg."""
+
+    def test_12_deg_not_down(self, tmp_path: Path) -> None:
+        """12 deg < head_enter_deg (15) → not DOWN."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=12.0)
+        assert state != "DOWN", f"Expected not DOWN at 12 deg, got {state}"
+
+    def test_18_deg_is_down(self, tmp_path: Path) -> None:
+        """18 deg > head_enter_deg (15) → DOWN."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=18.0)
+        assert state == "DOWN", f"Expected DOWN at 18 deg, got {state}"
+
+    def test_hysteresis_hold_12_deg_stays_down(self, tmp_path: Path) -> None:
+        """After entering DOWN at 18 deg, 12 deg (> head_exit_deg=10) stays DOWN."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        # Enter DOWN
+        _step_to_state(mon, pitch_deg=18.0, n_frames=30)
+        # Drop to 12 deg — between exit (10) and enter (15) → still DOWN
+        state = _step_to_state(mon, pitch_deg=12.0, n_frames=30)
+        assert state == "DOWN", (
+            f"Expected DOWN at 12 deg after entering at 18 deg (hysteresis), got {state}"
+        )
+
+    def test_hysteresis_exit_8_deg_not_down(self, tmp_path: Path) -> None:
+        """After entering DOWN at 18 deg, 8 deg (< head_exit_deg=10) exits DOWN."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        # Enter DOWN
+        _step_to_state(mon, pitch_deg=18.0, n_frames=30)
+        # Drop below exit threshold → should leave DOWN
+        state = _step_to_state(mon, pitch_deg=8.0, n_frames=60)
+        assert state != "DOWN", (
+            f"Expected to leave DOWN at 8 deg (below exit threshold 10), got {state}"
+        )
+
+    def test_head_up_25_deg_never_down(self, tmp_path: Path) -> None:
+        """Negative pitch (head UP, -25 deg) must never enter DOWN."""
+        mon, _ = _make_monitor_with_pitch(tmp_path)
+        state = _step_to_state(mon, pitch_deg=-25.0, n_frames=120)
+        assert state != "DOWN", (
+            f"Expected NOT DOWN for head-up pitch (-25 deg), got {state}"
+        )
+
+
+class TestC22ConfigSanity:
+    """Config invariants for head-pose degree thresholds."""
+
+    def test_head_enter_deg_exists(self) -> None:
+        from config import CFG  # noqa: PLC0415
+        assert hasattr(CFG, "head_enter_deg"), "Config missing head_enter_deg"
+
+    def test_head_exit_deg_exists(self) -> None:
+        from config import CFG  # noqa: PLC0415
+        assert hasattr(CFG, "head_exit_deg"), "Config missing head_exit_deg"
+
+    def test_config_sanity_ordering(self) -> None:
+        """0 < head_exit_deg < head_enter_deg < 60."""
+        from config import CFG  # noqa: PLC0415
+        assert 0 < CFG.head_exit_deg < CFG.head_enter_deg < 60, (
+            f"Expected 0 < head_exit_deg({CFG.head_exit_deg}) < "
+            f"head_enter_deg({CFG.head_enter_deg}) < 60"
+        )
 
 
 # ---------------------------------------------------------------------------

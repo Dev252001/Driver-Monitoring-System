@@ -76,15 +76,16 @@ class Config:
     """Seconds after the last rapid switch before turn mode is exited.
     Unit: seconds."""
 
-    # ── Head pose (normalised-y heuristic, replaced by solvePnP in Phase 2 C3) ─
-    head_enter_delta: float = 0.08
-    """Head-down detection threshold: nose-to-eye y-diff must exceed
-    baseline + head_enter_delta to enter DOWN state.  Unit: normalised coords
-    (0–1 range).  Scale-dependent — see finding C5."""
+    # ── Head pose (solvePnP pitch, Phase 2 C3) ───────────────────────────────
+    head_enter_deg: float = 15.0
+    """Head-down detection threshold: pitch delta relative to calibrated neutral
+    must exceed head_enter_deg to enter DOWN state.  Unit: degrees.
+    PROVISIONAL — tuned in Phase 3 Stage 3 sweep."""
 
-    head_exit_delta: float = 0.05
-    """Hysteresis exit threshold: must drop below baseline + head_exit_delta to
-    leave DOWN state.  Unit: normalised coords (0–1 range)."""
+    head_exit_deg: float = 10.0
+    """Hysteresis exit threshold: pitch delta must drop below head_exit_deg to
+    leave DOWN state.  Unit: degrees.
+    PROVISIONAL — tuned in Phase 3 Stage 3 sweep."""
 
     # ── State machine ────────────────────────────────────────────────────────
     stability_duration_s: float = 0.167
@@ -125,6 +126,25 @@ class Config:
 
     blink_reset_window_s: float = 30.0
     """Window duration for resetting the blink counter.  Unit: seconds."""
+
+    # ── Ablation flags (Phase 3 evaluation) ──────────────────────────────────
+    ema_enabled: bool = True
+    """If False, EAR and gaze EMA are bypassed (raw values used directly).
+    Ablation: tests the contribution of smoothing.  Default True = current behaviour."""
+
+    head_hysteresis_enabled: bool = True
+    """If False, head_exit_deg is set equal to head_enter_deg (no hysteresis).
+    Ablation: tests the contribution of pitch hysteresis.  Default True."""
+
+    use_yaw_for_gaze: bool = False
+    """If True, both yaw angle AND iris ratio must agree for LEFT/RIGHT alerts.
+    Default False = iris-only (current behaviour).
+    Ablation: tests whether adding yaw reduces false alarms."""
+
+    ear_fixed_threshold: float | None = None
+    """If set to a float, overrides the calibrated EAR threshold with this
+    fixed value.  Default None = use calibrated threshold (current behaviour).
+    Ablation: tests fixed (0.25) vs calibrated threshold."""
 
 
 # Module-level singleton — import and use CFG everywhere.

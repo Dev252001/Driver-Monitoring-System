@@ -23,17 +23,11 @@ from __future__ import annotations
 import time
 
 import cv2
-import mediapipe as mp
 
 from audio import AudioPlayer
+from landmark_adapter import process_frame
 from logger import EventLogger
 from monitor import DriverMonitor
-
-# ---------------------------------------------------------------------------
-# MediaPipe FaceMesh
-# refine_landmarks=True is required for iris landmarks 468-477.
-# ---------------------------------------------------------------------------
-_face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
 
 
 def main() -> None:
@@ -53,50 +47,22 @@ def main() -> None:
             if not ret:
                 break
 
-            # Pre-process: brighten slightly, mirror so left/right match driver perspective
-            frame = cv2.convertScaleAbs(frame, alpha=1.2, beta=20)
-            frame = cv2.flip(frame, 1)
-
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = _face_mesh.process(rgb)
+            lm, frame_w, frame_h = process_frame(frame)
             t = time.monotonic()
 
-            frame_h, frame_w = frame.shape[:2]
-
-            if results.multi_face_landmarks:
-                for face in results.multi_face_landmarks:
-                    result = monitor.process_landmarks(
-                        face.landmark, t, frame_w=frame_w, frame_h=frame_h
-                    )
-
-                    color = (
-                        (0, 255, 0)
-                        if result.state in ("ACTIVE", "CALIBRATING")
-                        else (0, 0, 255)
-                    )
-                    cv2.putText(
-                        frame, f"STATE: {result.state}", (30, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2,
-                    )
-                    cv2.putText(
-                        frame, f"EAR: {result.ema_ear:.2f}", (30, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2,
-                    )
-                    cv2.putText(
-                        frame, f"FATIGUE: {int(result.fatigue_score)}%", (30, 120),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2,
-                    )
-                    cv2.putText(
-                        frame, f"BLINKS: {result.blink_count}", (30, 150),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 255), 2,
-                    )
-                    cv2.putText(
-                        frame,
-                        f"P:{result.pitch_deg:+.1f} Y:{result.yaw_deg:+.1f}",
-                        (30, 180),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 255, 180), 2,
-                    )
-
+            if lm is not None:
+                result = monitor.process_landmarks(lm, t, frame_w=frame_w, frame_h=frame_h)
+                color = (0, 255, 0) if result.state in ("ACTIVE", "CALIBRATING") else (0, 0, 255)
+                cv2.putText(frame, f"STATE: {result.state}", (30, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                cv2.putText(frame, f"EAR: {result.ema_ear:.2f}", (30, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(frame, f"FATIGUE: {int(result.fatigue_score)}%", (30, 120),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+                cv2.putText(frame, f"BLINKS: {result.blink_count}", (30, 150),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 255), 2)
+                cv2.putText(frame, f"Pd:{result.pitch_delta:+.1f} Y:{result.yaw_deg:+.1f}",
+                            (30, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 255, 180), 2)
             else:
                 cv2.putText(
                     frame, "FACE NOT DETECTED", (150, 200),

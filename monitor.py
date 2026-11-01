@@ -48,6 +48,9 @@ class FrameResult:
     head_down:     True if the head-down heuristic fired (pitch > threshold).
     pitch_deg:     Head pitch in degrees from ``get_head_pose()``.
                    > 0 = head tilted DOWN.  0.0 until calibration is complete.
+    pitch_delta:   Pitch relative to calibrated neutral baseline (degrees).
+                   Positive = head tilted further down than neutral.
+                   0.0 during calibration.
     yaw_deg:       Head yaw in degrees from ``get_head_pose()``.
                    > 0 = head turned RIGHT (driver's right).
     state:         Driver state: ``"CALIBRATING"``, ``"ACTIVE"``,
@@ -63,6 +66,7 @@ class FrameResult:
     gaze: str
     head_down: bool
     pitch_deg: float
+    pitch_delta: float
     yaw_deg: float
     state: str
     fatigue_score: float
@@ -179,19 +183,37 @@ class DriverMonitor:
 
         # ── EAR ─────────────────────────────────────────────────────────
         ear = (
-            get_ear(lm, self._RIGHT_EYE) + get_ear(lm, self._LEFT_EYE)
+            get_ear(lm, self._RIGHT_EYE, frame_w, frame_h)
+            + get_ear(lm, self._LEFT_EYE, frame_w, frame_h)
         ) / 2
-        self._ema_ear = alpha_ear * ear + (1.0 - alpha_ear) * self._ema_ear
+        if CFG.ema_enabled:
+            self._ema_ear = alpha_ear * ear + (1.0 - alpha_ear) * self._ema_ear
+        else:
+            self._ema_ear = ear
 
         # ── GAZE (EMA done here with time-based alpha) ───────────────────
         raw_gaze_ratio = gaze_ratio(lm)
-        self._ema_gaze = alpha_gaze * raw_gaze_ratio + (1.0 - alpha_gaze) * self._ema_gaze
-        if self._ema_gaze > CFG.gaze_left_threshold:
-            gaze = "LEFT"
-        elif self._ema_gaze < CFG.gaze_right_threshold:
-            gaze = "RIGHT"
+        if CFG.ema_enabled:
+            self._ema_gaze = alpha_gaze * raw_gaze_ratio + (1.0 - alpha_gaze) * self._ema_gaze
         else:
-            gaze = "CENTER"
+            self._ema_gaze = raw_gaze_ratio
+        if self._ema_gaze > CFG.gaze_left_threshold:
+            iris_gaze = "LEFT"
+        elif self._ema_gaze < CFG.gaze_right_threshold:
+            iris_gaze = "RIGHT"
+        else:
+            iris_gaze = "CENTER"
+
+        if CFG.use_yaw_for_gaze and iris_gaze in ("LEFT", "RIGHT"):
+            # Require yaw to agree with iris direction (reduces false alarms).
+            # yaw_deg > 0 = head right (driver), < 0 = head left (driver).
+            yaw_agrees = (
+                (iris_gaze == "RIGHT" and self._yaw_deg > 0)
+                or (iris_gaze == "LEFT"  and self._yaw_deg < 0)
+            )
+            gaze = iris_gaze if yaw_agrees else "CENTER"
+        else:
+            gaze = iris_gaze
 
         # ── HEAD POSE (cv2.solvePnP) ─────────────────────────────────────
         self._pitch_deg, self._yaw_deg = get_head_pose(lm, frame_w, frame_h)
@@ -203,22 +225,25 @@ class DriverMonitor:
 
             if self.calibrated:
                 # Compute thresholds on completion
-                self._ear_threshold = (
-                    float(np.mean(self._ear_samples)) * CFG.ear_factor
-                )
+                calib_mean = float(np.mean(self._ear_samples))
+                if CFG.ear_fixed_threshold is not None:
+                    self._ear_threshold = CFG.ear_fixed_threshold
+                else:
+                    self._ear_threshold = calib_mean * CFG.ear_factor
                 self._pitch_neutral = float(np.mean(self._pitch_samples))
 
             state = "CALIBRATING"
+            pitch_delta = 0.0
 
         else:
-            # Determine head-down from pitch relative to neutral baseline
+            # Determine head-down from pitch relative to neutral baseline (degrees)
             pitch_delta = self._pitch_deg - self._pitch_neutral
-            enter = CFG.head_enter_delta * (180.0 / 0.08)   # convert normalised to degrees
-            exit_ = CFG.head_exit_delta  * (180.0 / 0.08)
+            exit_thresh = (CFG.head_enter_deg if not CFG.head_hysteresis_enabled
+                           else CFG.head_exit_deg)
             if self._head_down:
-                self._head_down = pitch_delta > exit_
+                self._head_down = pitch_delta > exit_thresh
             else:
-                self._head_down = pitch_delta > enter
+                self._head_down = pitch_delta > CFG.head_enter_deg
 
             state = self._classify(t, ear, gaze)
             self._update_fatigue(state, t)
@@ -231,6 +256,7 @@ class DriverMonitor:
             gaze=gaze,
             head_down=self._head_down,
             pitch_deg=self._pitch_deg,
+            pitch_delta=pitch_delta,
             yaw_deg=self._yaw_deg,
             state=state,
             fatigue_score=self._fatigue,

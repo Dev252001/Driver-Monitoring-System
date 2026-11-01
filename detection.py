@@ -22,42 +22,48 @@ from __future__ import annotations
 import numpy as np
 
 
-def get_ear(lm: list, eye: list[int]) -> float:
+def get_ear(
+    lm: list,
+    eye: list[int],
+    frame_w: int = 1,
+    frame_h: int = 1,
+) -> float:
     """Compute Eye Aspect Ratio for one eye (Soukupová & Čech 2016).
 
     Formula:
         EAR = (||p2-p6|| + ||p3-p5||) / (2 * ||p1-p4||)
 
+    Distances are computed in pixel space (landmark coords scaled by frame_w,
+    frame_h) so that the same physical eye geometry gives the same EAR
+    regardless of image resolution or aspect ratio (fix for finding C1).
+
     Args:
-        lm:  Full landmark list (MediaPipe normalised coords: x,y ∈ [0,1]).
-        eye: Six landmark indices [p1, p2, p3, p4, p5, p6] where
-             p1/p4 are horizontal corners and p2/p3/p5/p6 are
-             vertical lid landmarks.
+        lm:      Full landmark list (MediaPipe normalised coords: x,y ∈ [0,1]).
+        eye:     Six landmark indices [p1, p2, p3, p4, p5, p6] where
+                 p1/p4 are horizontal corners and p2/p3/p5/p6 are
+                 vertical lid landmarks.
+        frame_w: Frame width in pixels (default 1 → backward-compat unit square).
+        frame_h: Frame height in pixels (default 1 → backward-compat unit square).
 
     Returns:
-        EAR value (dimensionless).  0 for fully closed, ~0.2–0.4 for open.
+        EAR value (dimensionless).  0 for fully closed, ~0.15–0.35 for open.
 
-    Notes (finding C1 — aspect-ratio dependence):
-        The Euclidean distances are computed in normalised coordinate space
+    Notes (finding C1 — aspect-ratio dependence, fixed):
+        Previously distances were computed in normalised coordinate space
         (x ∈ [0,1] relative to image width, y ∈ [0,1] relative to image
         height).  On a non-square sensor (e.g. 640×480 vs 1280×720) the
-        horizontal and vertical scales differ, so the same physical eye
-        geometry produces different EAR values at different aspect ratios.
+        horizontal and vertical scales differed, so the same physical eye
+        produced different EAR values.  Scaling to pixel space makes the
+        ratio invariant to resolution and aspect ratio.
 
-        **Mitigation:** per-driver calibration records the driver's own
-        open-eye EAR distribution (``Config.calib_frames`` frames) and sets
-        the threshold as ``mean(EAR_calib) * Config.ear_factor``.  The
-        threshold adapts to each camera/aspect-ratio automatically; only
-        the relative drop matters.  A fixed cross-camera threshold of ~0.25
-        would not be reliable (see ``Config.ear_factor``).
+        **Threshold:** per-driver calibration sets the threshold as
+        ``mean(EAR_calib) * Config.ear_factor``; this adapts automatically
+        to each camera without any default change.
     """
-    p2 = np.array([lm[eye[1]].x, lm[eye[1]].y])
-    p6 = np.array([lm[eye[5]].x, lm[eye[5]].y])
-    p3 = np.array([lm[eye[2]].x, lm[eye[2]].y])
-    p5 = np.array([lm[eye[4]].x, lm[eye[4]].y])
-    p1 = np.array([lm[eye[0]].x, lm[eye[0]].y])
-    p4 = np.array([lm[eye[3]].x, lm[eye[3]].y])
+    def _pt(idx: int) -> np.ndarray:
+        return np.array([lm[idx].x * frame_w, lm[idx].y * frame_h])
 
+    p1, p2, p3, p4, p5, p6 = (_pt(eye[i]) for i in range(6))
     den = 2 * np.linalg.norm(p1 - p4) + 1e-6
     return float((np.linalg.norm(p2 - p6) + np.linalg.norm(p3 - p5)) / den)
 
@@ -218,19 +224,3 @@ def get_head_pose(lm: list, frame_w: int = 640, frame_h: int = 480) -> tuple[flo
     return pitch_deg, yaw_deg
 
 
-def get_head(lm, baseline, prev_down=False):
-    nose = lm[1].y
-    eye = (lm[33].y + lm[263].y) / 2
-    diff = nose - eye
-
-    if baseline is None:
-        return False, diff
-
-    # 🔥 hysteresis (stable detection)
-    enter = baseline + 0.08
-    exit_  = baseline + 0.05
-
-    if prev_down:
-        return (diff > exit_), diff
-    else:
-        return (diff > enter), diff

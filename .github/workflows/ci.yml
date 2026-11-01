@@ -22,13 +22,14 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install lint + test tools
-        run: pip install ruff pytest
+        run: pip install ruff pytest numpy==1.26.4
 
       - name: Ruff lint
         run: python -m ruff check .
 
       - name: Run tests (headless — no cv2/mediapipe/pygame at import time)
-        # mediapipe and opencv-contrib-python are NOT installed here.
-        # All tests must use lazy imports or injectable backends so that
-        # pytest can collect and run without those native libraries.
+        # Runtime deps (mediapipe, opencv-contrib-python, pygame) are NOT installed.
+        # numpy is installed so that monitor.py/detection.py can be imported.
+        # All tests use lazy imports or injectable backends (no cv2/mediapipe at
+        # collection time). See requirements.txt for the full verified pin set.
         run: python -m pytest tests/ -v

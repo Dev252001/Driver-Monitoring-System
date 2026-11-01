@@ -1,19 +1,20 @@
-"""Smoke check: verify library versions and that mediapipe FaceMesh runs on a black frame.
+"""Smoke check: verify library versions and that landmark_adapter works on a black frame.
+
+Uses landmark_adapter.process_frame (the shared adapter used by main.py and
+extract.py) instead of importing mp.solutions directly, so this test exercises
+the same code path as production.
 
 Run: python scripts/smoke_check.py
-
-Checks:
-  1. Print library versions.
-  2. Build FaceMesh(refine_landmarks=True) — required for iris landmarks 468-477.
-  3. Process a black 480x640 (H x W) frame — no face expected, no exception should be raised.
-  4. Assert numpy 2 does not break mediapipe at runtime (known risk with mediapipe 0.10.9).
-
 Exit 0 on success, non-zero on failure.
 """
 
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# Allow running from repo root or from scripts/
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def main() -> None:
@@ -22,6 +23,8 @@ def main() -> None:
     import numpy as np
     import pygame
 
+    from landmark_adapter import process_frame  # noqa: PLC0415
+
     print(f"Python   : {sys.version}")
     print(f"numpy    : {np.__version__}")
     print(f"cv2      : {cv2.__version__}")
@@ -29,27 +32,15 @@ def main() -> None:
     print(f"pygame   : {pygame.__version__}")
     print()
 
-    # --- Check 1: FaceMesh build with refine_landmarks=True ---
-    print("Building FaceMesh(refine_landmarks=True)...", end=" ")
-    face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
-    print("OK")
-
-    # --- Check 2: Process a black 480x640 RGB frame ---
-    # Height=480, Width=640 → shape (480, 640, 3)
+    # Process a black 480×640 BGR frame through the shared adapter.
+    # Expects no face detected and no exception raised.
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    print("Processing black frame (expect 0 faces)...", end=" ")
-    results = face_mesh.process(rgb)
-    n_faces = len(results.multi_face_landmarks) if results.multi_face_landmarks else 0
-    assert n_faces == 0, f"Expected 0 faces on black frame, got {n_faces}"
-    print(f"OK (detected {n_faces} faces)")
+    print("Calling landmark_adapter.process_frame on black 640×480 frame...", end=" ")
+    lm, frame_w, frame_h = process_frame(frame)
+    assert lm is None, "Expected no face on black frame, got landmarks"
+    assert frame_w == 640 and frame_h == 480, f"Unexpected frame size: {frame_w}×{frame_h}"
+    print(f"OK (no face, {frame_w}×{frame_h})")
 
-    # --- Check 3: Confirm iris landmarks would be available if a face is found ---
-    # We cannot inject a real face here without a camera, so we just verify that
-    # refine_landmarks=True produced a FaceMesh that does not error on a blank frame.
-    print("refine_landmarks=True: iris landmarks (468-477) will be present when a face is detected")
-
-    face_mesh.close()
     print()
     print("All smoke checks passed.")
 
