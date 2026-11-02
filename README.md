@@ -1,4 +1,4 @@
-# 🚗 Rule-Based Driver Monitoring System
+# Rule-Based Driver Monitoring System
 
 A real-time, rule-based driver drowsiness and distraction detection system built with Python, MediaPipe, and OpenCV. It monitors eye activity, gaze direction, and head pose via webcam and plays audio alerts when unsafe behaviour is detected.
 
