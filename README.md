@@ -249,12 +249,6 @@ These follow directly from the limitations above.
 
 ---
 
-## Development Notes
-
-This project was built with the assistance of AI tool. The author reviewed the codes, logic, thresholds and architecture; the thresholds have not been validated on real-driver data (see [Limitations](#limitations)). Every behaviour-changing fix is recorded with its before/after behaviour in [`CHANGELOG.md`](CHANGELOG.md).
-
----
-
 ## License
 
 MIT, see [`LICENSE`](LICENSE). Author: [@Dev252001](https://github.com/Dev252001).
